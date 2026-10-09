@@ -1,0 +1,165 @@
+name: Deploy BHive backend to dev
+
+on:
+  push:
+    branches:
+      - dev
+      - 'feature/**'
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: bhive-backend-dev
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ap-south-1
+  JAVA_VERSION: '17'
+  DEPLOYMENT_BUCKET: bhive-deployments-dev
+
+jobs:
+  deploy:
+    name: Deploy Spring Boot backend to EC2
+    runs-on: ubuntu-latest
+    environment: dev
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: maven
+
+      - name: Build and test with Maven
+        run: |
+          chmod +x mvnw
+          ./mvnw -B clean verify
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::615299739840:role/github-actions-deploy-dev
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Create deployment package
+        run: |
+          mkdir -p staging
+          cp target/bhive-platform-0.0.1-SNAPSHOT.jar staging/app.jar
+          cp Dockerfile docker-compose.bhive-dev.yml staging/
+          tar -C staging -czf bhive-deployment.tar.gz .
+
+      - name: Upload deployment package to S3
+        run: |
+          aws s3 cp bhive-deployment.tar.gz \
+            "s3://${DEPLOYMENT_BUCKET}/bhive-backend/dev/${GITHUB_SHA}/deployment.tar.gz"
+
+      - name: Deploy to EC2 through Systems Manager
+        env:
+          EC2_INSTANCE_ID: i-05017512a3f92da35
+        run: |
+          set -euo pipefail
+
+          S3_KEY="bhive-backend/dev/${GITHUB_SHA}/deployment.tar.gz"
+          jq -n \
+            --arg bucket "$DEPLOYMENT_BUCKET" \
+            --arg key "$S3_KEY" \
+            '{
+              commands: [
+                "set -eu",
+                "APP_DIR=/opt/apps/bhive-backend-dev",
+                "mkdir -p \"$APP_DIR\"",
+                "cd \"$APP_DIR\"",
+                "aws s3 cp \"s3://\($bucket)/\($key)\" deployment.tar.gz",
+                "tar -xzf deployment.tar.gz",
+                "rm -f deployment.tar.gz",
+                "docker compose -f docker-compose.bhive-dev.yml up -d --build --remove-orphans"
+              ]
+            }' > ssm-parameters.json
+
+          COMMAND_ID=$(aws ssm send-command \
+            --instance-ids "$EC2_INSTANCE_ID" \
+            --document-name AWS-RunShellScript \
+            --parameters file://ssm-parameters.json \
+            --timeout-seconds 600 \
+            --output text \
+            --query 'Command.CommandId' \
+            --region "$AWS_REGION")
+          echo "SSM command ID: $COMMAND_ID"
+
+          if ! aws ssm wait command-executed \
+            --command-id "$COMMAND_ID" \
+            --instance-id "$EC2_INSTANCE_ID" \
+            --max-attempts 120 \
+            --delay 10 \
+            --region "$AWS_REGION"; then
+            aws ssm get-command-invocation \
+              --command-id "$COMMAND_ID" \
+              --instance-id "$EC2_INSTANCE_ID" \
+              --query '{Status:Status,StandardOutputContent:StandardOutputContent,StandardErrorContent:StandardErrorContent}' \
+              --output json \
+              --region "$AWS_REGION"
+            exit 1
+          fi
+
+          aws ssm get-command-invocation \
+            --command-id "$COMMAND_ID" \
+            --instance-id "$EC2_INSTANCE_ID" \
+            --query 'StandardOutputContent' \
+            --output text \
+            --region "$AWS_REGION"
+
+      - name: Verify deployment
+        env:
+          EC2_INSTANCE_ID: i-05017512a3f92da35
+        run: |
+          set -euo pipefail
+
+          jq -n '{
+            commands: [
+              "set -eu",
+              "for attempt in $(seq 1 60); do if docker ps --filter name=bhive-backend-dev --filter status=running --format \"{{.Names}}\" | grep -qx bhive-backend-dev; then echo \"BHive backend container is running\"; exit 0; fi; sleep 5; done",
+              "docker compose -f /opt/apps/bhive-backend-dev/docker-compose.bhive-dev.yml ps",
+              "docker compose -f /opt/apps/bhive-backend-dev/docker-compose.bhive-dev.yml logs --tail=100 bhive-backend-dev",
+              "exit 1"
+            ]
+          }' > ssm-verification-parameters.json
+
+          VERIFY_ID=$(aws ssm send-command \
+            --instance-ids "$EC2_INSTANCE_ID" \
+            --document-name AWS-RunShellScript \
+            --parameters file://ssm-verification-parameters.json \
+            --timeout-seconds 600 \
+            --output text \
+            --query 'Command.CommandId' \
+            --region "$AWS_REGION")
+          echo "Verification command ID: $VERIFY_ID"
+
+          if ! aws ssm wait command-executed \
+            --command-id "$VERIFY_ID" \
+            --instance-id "$EC2_INSTANCE_ID" \
+            --max-attempts 120 \
+            --delay 10 \
+            --region "$AWS_REGION"; then
+            aws ssm get-command-invocation \
+              --command-id "$VERIFY_ID" \
+              --instance-id "$EC2_INSTANCE_ID" \
+              --query '{Status:Status,StandardOutputContent:StandardOutputContent,StandardErrorContent:StandardErrorContent}' \
+              --output json \
+              --region "$AWS_REGION"
+            exit 1
+          fi
+
+          aws ssm get-command-invocation \
+            --command-id "$VERIFY_ID" \
+            --instance-id "$EC2_INSTANCE_ID" \
+            --query 'StandardOutputContent' \
+            --output text \
+            --region "$AWS_REGION"
+
+          echo "BHive dev is available at http://<EC2-public-ip>:8084"

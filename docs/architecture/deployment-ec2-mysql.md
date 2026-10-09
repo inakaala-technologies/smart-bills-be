@@ -19,3 +19,6 @@
 - monitoring and alerting
 - environment-based configuration
 - secure secret management
+
+## Dev deployment
+The backend's GitHub Actions workflow deploys the dev container to EC2 through OIDC and Systems Manager. It publishes port `8084` directly and leaves the host's Nginx configuration untouched. See [GitHub Actions Deployment to EC2](github-actions-ec2-deployment.md) for setup details.
