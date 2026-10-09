@@ -9,7 +9,7 @@ Authentication answers the question: Who are you?
 - `BHIVE_REFRESH_COOKIE_SAME_SITE` may be set for the deployed topology; cross-site cookie modes require additional CSRF review.
 - Protected API requests must send `Authorization: Bearer <accessToken>`.
 - Set `BHIVE_JWT_SECRET` to a unique secret of at least 32 bytes in every environment. The development fallback must never be used in production.
-- Set `DB_URL`, `DB_USERNAME`, and `DB_PASSWORD`; database credentials are not stored in application configuration.
+- Database credentials are loaded from AWS Secrets Manager; configure the secret ID, AWS region, and workload IAM permissions as described in [Database Credentials with AWS Secrets Manager](aws-secrets-manager-database.md).
 - Apply `src/main/resources/db/migration/V1__create_auth_refresh_tokens.sql` before starting production, where Hibernate validates rather than creates the schema.
 - Public registration supports business and customer accounts only. Administrator accounts must be provisioned out of band.
 - Legacy plaintext passwords are upgraded to BCrypt after a successful login. New passwords are stored with BCrypt.

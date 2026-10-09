@@ -23,4 +23,4 @@ mvn spring-boot:run
 ```
 
 ## Database
-This project expects a MySQL instance available on localhost:3306 with a database named `bhive_db`.
+Database credentials are loaded from AWS Secrets Manager. Configure the secret ID, AWS region, and runtime credentials for your active profile. See [Database Credentials with AWS Secrets Manager](docs/architecture/aws-secrets-manager-database.md) for secret JSON format, IAM permissions, local AWS SSO setup, and the development-only local fallback.
