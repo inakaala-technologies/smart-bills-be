@@ -15,7 +15,7 @@ The GitHub role needs permission to upload objects under `bhive-backend/dev/*`, 
 Before the first deployment, the EC2 instance must:
 
 - Be registered as an online Systems Manager managed node, with the `AmazonSSMManagedInstanceCore` instance profile policy.
-- Have Docker Engine and the Docker Compose plugin installed.
+- Have Docker Engine and the `docker-compose` command installed.
 - Be able to download the archive from the deployment bucket (`s3:GetObject` scoped to `bhive-backend/dev/*`) and reach AWS Systems Manager. Use suitable VPC endpoints or outbound network access.
 - Have its own runtime IAM role granting `secretsmanager:GetSecretValue` for `dev/bhive/db`. Grant `kms:Decrypt` on the customer-managed key if the secret uses one. This EC2 role is distinct from the GitHub OIDC role.
 - Allow the application container to access EC2 instance metadata credentials. With IMDSv2, configure the metadata hop limit for container networking as needed; do not pass AWS access keys into Docker Compose.

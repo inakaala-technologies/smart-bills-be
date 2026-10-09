@@ -64,38 +64,27 @@ jobs:
         env:
           EC2_INSTANCE_ID: i-05017512a3f92da35
         run: |
-          set -euo pipefail
-
-          S3_KEY="bhive-backend/dev/bhive-deployment.tar.gz"
-          jq -n \
-            --arg bucket "$DEPLOYMENT_BUCKET" \
-            --arg key "$S3_KEY" \
-            '{
-              commands: [
-                "set -e",
-                "APP_DIR=/opt/apps/bhive-backend-dev",
-                "mkdir -p \"$APP_DIR\"",
-                "cd \"$APP_DIR\"",
-                "aws s3 cp \"s3://\($bucket)/\($key)\" deployment.tar.gz",
-                "tar -xzf deployment.tar.gz",
-                "rm -f deployment.tar.gz",
-                "docker compose -f docker-compose.bhive-dev.yml down --rmi local --remove-orphans || true",
-                "docker builder prune -f",
-                "docker image prune -f",
-                "docker compose -f docker-compose.bhive-dev.yml up -d --build --no-deps",
-                "docker image prune -f"
-              ]
-            }' > ssm-parameters.json
-
           COMMAND_ID=$(aws ssm send-command \
             --instance-ids "$EC2_INSTANCE_ID" \
-            --document-name AWS-RunShellScript \
-            --parameters file://ssm-parameters.json \
-            --timeout-seconds 600 \
+            --document-name "AWS-RunShellScript" \
+            --parameters 'commands=[
+              "set -e",
+              "APP_DIR=/opt/apps/bhive-backend-dev",
+              "mkdir -p $APP_DIR",
+              "cd $APP_DIR",
+              "aws s3 cp s3://${{ env.DEPLOYMENT_BUCKET }}/bhive-backend/dev/bhive-deployment.tar.gz .",
+              "tar -xzf bhive-deployment.tar.gz",
+              "rm -f bhive-deployment.tar.gz",
+              "docker-compose -f docker-compose.bhive-dev.yml down --rmi local --remove-orphans || true",
+              "docker builder prune -f",
+              "docker image prune -f",
+              "docker-compose -f docker-compose.bhive-dev.yml up -d --build --no-deps",
+              "docker image prune -f"
+            ]' \
             --output text \
             --query 'Command.CommandId' \
             --region "$AWS_REGION")
-          echo "SSM command ID: $COMMAND_ID"
+          echo "SSM Command ID: $COMMAND_ID"
           echo "Waiting for deployment command to complete..."
           if ! aws ssm wait command-executed \
             --command-id "$COMMAND_ID" \
