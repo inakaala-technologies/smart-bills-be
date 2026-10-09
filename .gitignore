@@ -1,0 +1,32 @@
+# Maven build output
+/target/
+/out/
+
+# Maven test output captures
+/maven-*-check.txt
+
+# Logs and JVM crash dumps
+/logs/
+*.log
+*.dump
+*.dumpstream
+hs_err_pid*
+replay_pid*
+
+# Local environment files
+.env
+.env.*
+!.env.example
+
+# IDE files
+.idea/
+.vscode/
+*.iml
+.classpath
+.project
+.settings/
+
+# Operating system files
+.DS_Store
+Thumbs.db
+desktop.ini
