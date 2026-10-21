@@ -34,3 +34,4 @@ Apply `migrations/2026-09-29-location-discovery.sql` before deploying GPS regist
 
 Apply `migrations/2026-10-19-loyalty-points.sql` before deploying loyalty rules and point ledgers in production.
 Apply `migrations/2026-10-20-loyalty-redemption.sql` before deploying point redemption settings and checkout integration in production.
+Apply `migrations/2026-10-21-business-features.sql` before deploying configurable business feature availability in production.

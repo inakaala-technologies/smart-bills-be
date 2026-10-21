@@ -48,6 +48,9 @@ public class Business {
     @Column(name = "appointments_enabled", nullable = false)
     private boolean appointmentsEnabled;
 
+    @Column(name = "memberships_enabled", nullable = false)
+    private boolean membershipsEnabled = true;
+
     @Column(nullable = false)
     @Enumerated(EnumType.STRING)
     private BusinessStatus status = BusinessStatus.ACTIVE;
@@ -174,6 +177,14 @@ public class Business {
 
     public void setAppointmentsEnabled(boolean appointmentsEnabled) {
         this.appointmentsEnabled = appointmentsEnabled;
+    }
+
+    public boolean isMembershipsEnabled() {
+        return membershipsEnabled;
+    }
+
+    public void setMembershipsEnabled(boolean membershipsEnabled) {
+        this.membershipsEnabled = membershipsEnabled;
     }
 
     public BusinessStatus getStatus() {

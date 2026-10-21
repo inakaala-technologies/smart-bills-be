@@ -72,6 +72,24 @@ public class AppointmentConfigurationController {
             .orElse(ResponseEntity.status(HttpStatus.FORBIDDEN).build());
     }
 
+    @PutMapping("/businesses/{businessId}/memberships-enabled")
+    public ResponseEntity<?> setMembershipsEnabled(@PathVariable Long businessId, @RequestParam boolean enabled) {
+        Long tenantId = TenantContext.getTenantId();
+        Long userId = TenantContext.getUserId();
+        if (tenantId == null || userId == null) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
+
+        return businessRepository.findById(businessId)
+            .filter(business -> tenantId.equals(business.getTenantId()))
+            .filter(business -> businessMembershipService.userHasAccessToBusiness(userId, businessId, tenantId))
+            .map(business -> {
+                business.setMembershipsEnabled(enabled);
+                return ResponseEntity.ok(businessRepository.save(business));
+            })
+            .orElse(ResponseEntity.status(HttpStatus.FORBIDDEN).build());
+    }
+
     @GetMapping("/appointment-services")
     public ResponseEntity<List<AppointmentService>> getAppointmentServices(@RequestParam Long businessId) {
         Long tenantId = TenantContext.getTenantId();

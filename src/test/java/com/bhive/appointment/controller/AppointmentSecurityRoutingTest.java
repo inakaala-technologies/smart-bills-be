@@ -15,6 +15,7 @@ import com.bhive.customer.entity.CustomerProfile;
 import com.bhive.customer.repository.BusinessCustomerRepository;
 import com.bhive.customer.repository.CustomerProfileRepository;
 import com.bhive.notification.service.NotificationService;
+import com.bhive.loyalty.service.LoyaltyService;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Optional;
@@ -68,6 +69,9 @@ class AppointmentSecurityRoutingTest {
 
     @MockBean
     private NotificationService notificationService;
+
+    @MockBean
+    private LoyaltyService loyaltyService;
 
     @MockBean
     private AccessTokenService accessTokenService;

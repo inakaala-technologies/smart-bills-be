@@ -102,6 +102,20 @@ class AppointmentConfigurationControllerTest {
     }
 
     @Test
+    void businessCanUpdateMembershipAvailability() throws Exception {
+        Business business = new Business();
+        business.setTenantId(5L);
+        Mockito.when(businessRepository.findById(1L)).thenReturn(Optional.of(business));
+        Mockito.when(businessMembershipService.userHasAccessToBusiness(9L, 1L, 5L)).thenReturn(true);
+        Mockito.when(businessRepository.save(Mockito.any(Business.class)))
+            .thenAnswer(invocation -> invocation.getArgument(0));
+
+        mockMvc.perform(put("/api/v1/businesses/1/memberships-enabled").param("enabled", "false"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.membershipsEnabled").value(false));
+    }
+
+    @Test
     void customerCanSeeEnabledServicesForLinkedBusiness() throws Exception {
         Business business = new Business();
         business.setTenantId(5L);
