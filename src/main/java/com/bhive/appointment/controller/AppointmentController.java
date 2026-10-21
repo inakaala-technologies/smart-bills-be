@@ -8,6 +8,8 @@ import com.bhive.appointment.dto.AppointmentAvailabilityResponse;
 import com.bhive.appointment.dto.AppointmentStaffOption;
 import com.bhive.appointment.repository.AppointmentRepository;
 import com.bhive.appointment.repository.AppointmentServiceRepository;
+import com.bhive.appointment.service.AppointmentBillingService;
+import com.bhive.billing.entity.Invoice;
 import com.bhive.business.entity.Business;
 import com.bhive.business.entity.BusinessUser;
 import com.bhive.business.repository.BusinessRepository;
@@ -55,6 +57,7 @@ public class AppointmentController {
     private final BusinessUserRepository businessUserRepository;
     private final NotificationService notificationService;
     private final LoyaltyService loyaltyService;
+    private final AppointmentBillingService appointmentBillingService;
 
     public AppointmentController(AppointmentRepository appointmentRepository,
                                  AppointmentServiceRepository appointmentServiceRepository,
@@ -64,7 +67,8 @@ public class AppointmentController {
                                  BusinessCustomerRepository businessCustomerRepository,
                                  BusinessUserRepository businessUserRepository,
                                  NotificationService notificationService,
-                                 LoyaltyService loyaltyService) {
+                                 LoyaltyService loyaltyService,
+                                 AppointmentBillingService appointmentBillingService) {
         this.appointmentRepository = appointmentRepository;
         this.appointmentServiceRepository = appointmentServiceRepository;
         this.businessMembershipService = businessMembershipService;
@@ -74,6 +78,7 @@ public class AppointmentController {
         this.businessUserRepository = businessUserRepository;
         this.notificationService = notificationService;
         this.loyaltyService = loyaltyService;
+        this.appointmentBillingService = appointmentBillingService;
     }
 
     @GetMapping("/appointments")
@@ -384,6 +389,9 @@ public class AppointmentController {
                 LoyaltyTargetType.SERVICE, saved.getAppointmentServiceId(),
                 "APPOINTMENT-EARN:" + saved.getId(), "APPOINTMENT", saved.getId(),
                 "Points earned for completed service");
+        }
+        if (previousStatus != AppointmentStatus.COMPLETED && requestedStatus == AppointmentStatus.COMPLETED) {
+            appointmentBillingService.createInvoiceForCompletedAppointment(saved, tenantId, userId);
         }
         if (previousStatus != AppointmentStatus.CANCELLED && requestedStatus == AppointmentStatus.CANCELLED
             && saved.getLoyaltyPointsRedeemed() != null && saved.getLoyaltyPointsRedeemed() > 0) {

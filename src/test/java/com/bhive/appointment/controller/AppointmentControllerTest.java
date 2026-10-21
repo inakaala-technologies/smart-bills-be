@@ -5,6 +5,7 @@ import com.bhive.appointment.entity.AppointmentService;
 import com.bhive.appointment.entity.AppointmentStatus;
 import com.bhive.appointment.repository.AppointmentRepository;
 import com.bhive.appointment.repository.AppointmentServiceRepository;
+import com.bhive.appointment.service.AppointmentBillingService;
 import com.bhive.business.entity.Business;
 import com.bhive.business.entity.BusinessUser;
 import com.bhive.business.repository.BusinessRepository;
@@ -72,6 +73,9 @@ class AppointmentControllerTest {
 
     @MockBean
     private LoyaltyService loyaltyService;
+
+    @MockBean
+    private AppointmentBillingService appointmentBillingService;
 
     @BeforeEach
     void setTenantContext() {
@@ -321,6 +325,43 @@ class AppointmentControllerTest {
         Mockito.verify(notificationService).create(
             5L, 44L, "APPOINTMENT_CANCELLED", "Appointment cancelled",
             "Your appointment for Consultation was cancelled.", "/dashboard"
+        );
+    }
+
+    @Test
+    void completingAppointmentAutomaticallyCreatesCustomerInvoice() throws Exception {
+        Appointment appointment = new Appointment();
+        appointment.setId(14L);
+        appointment.setBusinessId(1L);
+        appointment.setCustomerId(2L);
+        appointment.setServiceName("Consultation");
+        appointment.setServicePrice(new java.math.BigDecimal("450.00"));
+        appointment.setScheduledAt(LocalDateTime.now().minusHours(1));
+        appointment.setDurationMinutes(30);
+        appointment.setStatus(AppointmentStatus.CONFIRMED);
+
+        Business business = new Business();
+        business.setTenantId(5L);
+        CustomerProfile customer = new CustomerProfile();
+        customer.setId(2L);
+        customer.setTenantId(5L);
+        customer.setUserId(44L);
+        Mockito.when(appointmentRepository.findById(14L)).thenReturn(Optional.of(appointment));
+        Mockito.when(businessRepository.findById(1L)).thenReturn(Optional.of(business));
+        Mockito.when(businessMembershipService.userHasAccessToBusiness(9L, 1L, 5L)).thenReturn(true);
+        Mockito.when(customerProfileRepository.findByUserIdAndTenantId(9L, 5L)).thenReturn(Optional.empty());
+        Mockito.when(customerProfileRepository.findById(2L)).thenReturn(Optional.of(customer));
+        Mockito.when(appointmentRepository.save(Mockito.any(Appointment.class)))
+            .thenAnswer(invocation -> invocation.getArgument(0));
+
+        mockMvc.perform(put("/api/v1/appointments/14/status").param("status", "COMPLETED"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.status").value("COMPLETED"));
+
+        Mockito.verify(appointmentBillingService).createInvoiceForCompletedAppointment(appointment, 5L, 9L);
+        Mockito.verify(notificationService).create(
+            5L, 44L, "APPOINTMENT_COMPLETED", "Appointment completed",
+            "Your appointment for Consultation was completed.", "/dashboard"
         );
     }
 

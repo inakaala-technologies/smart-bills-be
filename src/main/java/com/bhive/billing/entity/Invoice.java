@@ -19,6 +19,9 @@ public class Invoice {
     @Column(name = "customer_id", nullable = false)
     private Long customerId;
 
+    @Column(name = "appointment_id", unique = true)
+    private Long appointmentId;
+
     @Column(name = "invoice_number", nullable = false, unique = true)
     private String invoiceNumber;
 
@@ -86,6 +89,14 @@ public class Invoice {
 
     public void setCustomerId(Long customerId) {
         this.customerId = customerId;
+    }
+
+    public Long getAppointmentId() {
+        return appointmentId;
+    }
+
+    public void setAppointmentId(Long appointmentId) {
+        this.appointmentId = appointmentId;
     }
 
     public String getInvoiceNumber() {

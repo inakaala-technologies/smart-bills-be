@@ -3,6 +3,7 @@ package com.bhive.appointment.controller;
 import com.bhive.appointment.entity.AppointmentService;
 import com.bhive.appointment.repository.AppointmentRepository;
 import com.bhive.appointment.repository.AppointmentServiceRepository;
+import com.bhive.appointment.service.AppointmentBillingService;
 import com.bhive.business.entity.Business;
 import com.bhive.business.repository.BusinessRepository;
 import com.bhive.business.repository.BusinessUserRepository;
@@ -72,6 +73,9 @@ class AppointmentSecurityRoutingTest {
 
     @MockBean
     private LoyaltyService loyaltyService;
+
+    @MockBean
+    private AppointmentBillingService appointmentBillingService;
 
     @MockBean
     private AccessTokenService accessTokenService;
