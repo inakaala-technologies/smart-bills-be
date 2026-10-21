@@ -1,112 +1,124 @@
 package com.bhive.auth.entity;
 
 import jakarta.persistence.*;
+import jakarta.validation.constraints.Size;
+
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "bhive_users", uniqueConstraints = {
-    @UniqueConstraint(columnNames = "email")
-})
+@Table(name = "bhive_users", uniqueConstraints = { @UniqueConstraint(columnNames = "email") })
 public class User {
 
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
+	@Id
+	@GeneratedValue(strategy = GenerationType.IDENTITY)
+	private Long id;
 
-    @Column(nullable = false)
-    private String name;
+	@Column(nullable = false)
+	private String name;
 
-    @Column(nullable = false)
-    private String email;
+	@Column(nullable = false)
+	private String email;
 
-    @Column(name = "tenant_id")
-    private Long tenantId;
+	@Size(max = 30)
+	private String phone;
 
-    @Column(nullable = false)
-    private String password;
+	@Column(name = "tenant_id")
+	private Long tenantId;
 
-    @Enumerated(EnumType.STRING)
-    @Column(nullable = false)
-    private UserRole role;
+	@Column(nullable = false)
+	private String password;
 
-    @Column(name = "created_at", nullable = false, updatable = false)
-    private LocalDateTime createdAt;
+	@Enumerated(EnumType.STRING)
+	@Column(nullable = false)
+	private UserRole role;
 
-    @Column(name = "updated_at")
-    private LocalDateTime updatedAt;
+	@Column(name = "created_at", nullable = false, updatable = false)
+	private LocalDateTime createdAt;
 
-    @PrePersist
-    protected void onCreate() {
-        createdAt = LocalDateTime.now();
-        updatedAt = LocalDateTime.now();
-    }
+	@Column(name = "updated_at")
+	private LocalDateTime updatedAt;
 
-    @PreUpdate
-    protected void onUpdate() {
-        updatedAt = LocalDateTime.now();
-    }
+	@PrePersist
+	protected void onCreate() {
+		createdAt = LocalDateTime.now();
+		updatedAt = LocalDateTime.now();
+	}
 
-    public Long getId() {
-        return id;
-    }
+	@PreUpdate
+	protected void onUpdate() {
+		updatedAt = LocalDateTime.now();
+	}
 
-    public void setId(Long id) {
-        this.id = id;
-    }
+	public Long getId() {
+		return id;
+	}
 
-    public String getName() {
-        return name;
-    }
+	public void setId(Long id) {
+		this.id = id;
+	}
 
-    public void setName(String name) {
-        this.name = name;
-    }
+	public String getName() {
+		return name;
+	}
 
-    public String getEmail() {
-        return email;
-    }
+	public void setName(String name) {
+		this.name = name;
+	}
 
-    public void setEmail(String email) {
-        this.email = email;
-    }
+	public String getEmail() {
+		return email;
+	}
 
-    public Long getTenantId() {
-        return tenantId;
-    }
+	public void setEmail(String email) {
+		this.email = email;
+	}
 
-    public void setTenantId(Long tenantId) {
-        this.tenantId = tenantId;
-    }
+	public Long getTenantId() {
+		return tenantId;
+	}
 
-    public String getPassword() {
-        return password;
-    }
+	public void setTenantId(Long tenantId) {
+		this.tenantId = tenantId;
+	}
 
-    public void setPassword(String password) {
-        this.password = password;
-    }
+	public String getPassword() {
+		return password;
+	}
 
-    public UserRole getRole() {
-        return role;
-    }
+	public void setPassword(String password) {
+		this.password = password;
+	}
 
-    public void setRole(UserRole role) {
-        this.role = role;
-    }
+	public UserRole getRole() {
+		return role;
+	}
 
-    public LocalDateTime getCreatedAt() {
-        return createdAt;
-    }
+	public void setRole(UserRole role) {
+		this.role = role;
+	}
 
-    public void setCreatedAt(LocalDateTime createdAt) {
-        this.createdAt = createdAt;
-    }
+	public LocalDateTime getCreatedAt() {
+		return createdAt;
+	}
 
-    public LocalDateTime getUpdatedAt() {
-        return updatedAt;
-    }
+	public void setCreatedAt(LocalDateTime createdAt) {
+		this.createdAt = createdAt;
+	}
 
-    public void setUpdatedAt(LocalDateTime updatedAt) {
-        this.updatedAt = updatedAt;
-    }
+	public LocalDateTime getUpdatedAt() {
+		return updatedAt;
+	}
+
+	public void setUpdatedAt(LocalDateTime updatedAt) {
+		this.updatedAt = updatedAt;
+	}
+
+	public String getPhone() {
+		return phone;
+	}
+
+	public void setPhone(String phone) {
+		this.phone = phone;
+	}
+
 }
