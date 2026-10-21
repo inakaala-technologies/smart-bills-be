@@ -23,6 +23,7 @@ import com.bhive.membership.repository.MembershipPlanRepository;
 import com.bhive.membership.repository.MembershipRepository;
 import com.bhive.business.repository.BusinessRepository;
 import com.bhive.notification.service.NotificationService;
+import com.bhive.loyalty.service.LoyaltyService;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -69,6 +70,9 @@ class MembershipManagementControllerTest {
 
     @MockBean
     private NotificationService notificationService;
+
+    @MockBean
+    private LoyaltyService loyaltyService;
 
     @BeforeEach
     void setTenantContext() {

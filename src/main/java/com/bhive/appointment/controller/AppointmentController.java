@@ -18,6 +18,11 @@ import com.bhive.customer.entity.CustomerProfile;
 import com.bhive.customer.repository.BusinessCustomerRepository;
 import com.bhive.customer.repository.CustomerProfileRepository;
 import com.bhive.notification.service.NotificationService;
+import com.bhive.loyalty.dto.LoyaltyTransactionRequest;
+import com.bhive.loyalty.entity.LoyaltyEntryType;
+import com.bhive.loyalty.entity.LoyaltyTargetType;
+import com.bhive.loyalty.service.LoyaltyService;
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.time.LocalDate;
 import java.time.LocalTime;
@@ -35,6 +40,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.transaction.annotation.Transactional;
 
 @RestController
 @RequestMapping("/api/v1")
@@ -48,6 +54,7 @@ public class AppointmentController {
     private final BusinessCustomerRepository businessCustomerRepository;
     private final BusinessUserRepository businessUserRepository;
     private final NotificationService notificationService;
+    private final LoyaltyService loyaltyService;
 
     public AppointmentController(AppointmentRepository appointmentRepository,
                                  AppointmentServiceRepository appointmentServiceRepository,
@@ -56,7 +63,8 @@ public class AppointmentController {
                                  CustomerProfileRepository customerProfileRepository,
                                  BusinessCustomerRepository businessCustomerRepository,
                                  BusinessUserRepository businessUserRepository,
-                                 NotificationService notificationService) {
+                                 NotificationService notificationService,
+                                 LoyaltyService loyaltyService) {
         this.appointmentRepository = appointmentRepository;
         this.appointmentServiceRepository = appointmentServiceRepository;
         this.businessMembershipService = businessMembershipService;
@@ -65,6 +73,7 @@ public class AppointmentController {
         this.businessCustomerRepository = businessCustomerRepository;
         this.businessUserRepository = businessUserRepository;
         this.notificationService = notificationService;
+        this.loyaltyService = loyaltyService;
     }
 
     @GetMapping("/appointments")
@@ -215,11 +224,15 @@ public class AppointmentController {
     }
 
     @PostMapping("/appointments")
+    @Transactional
     public ResponseEntity<Appointment> createAppointment(@RequestBody Appointment request) {
         Long tenantId = TenantContext.getTenantId();
         Long userId = TenantContext.getUserId();
-        if (tenantId == null || userId == null || request.getBusinessId() == null) {
+        if (request == null || tenantId == null || userId == null || request.getBusinessId() == null) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
+        if (request.getLoyaltyPointsToRedeem() != null && request.getLoyaltyPointsToRedeem() < 0) {
+            return ResponseEntity.badRequest().build();
         }
 
         LocalDateTime scheduledAt = request.getScheduledAt();
@@ -289,11 +302,22 @@ public class AppointmentController {
         appointment.setStaffUserId(assignedStaffId);
         appointment.setServiceName(selectedService.get().getName());
         appointment.setServicePrice(selectedService.get().getPrice());
+        appointment.setLoyaltyPointsRedeemed(0);
+        appointment.setLoyaltyDiscountAmount(BigDecimal.ZERO);
         appointment.setScheduledAt(scheduledAt);
         appointment.setDurationMinutes(selectedService.get().getDurationMinutes());
         appointment.setStatus(AppointmentStatus.BOOKED);
         appointment.setNotes(request.getNotes() == null ? null : request.getNotes().trim());
         Appointment saved = appointmentRepository.save(appointment);
+        int pointsToRedeem = request.getLoyaltyPointsToRedeem() == null ? 0 : request.getLoyaltyPointsToRedeem();
+        if (pointsToRedeem > 0) {
+            var redemption = loyaltyService.redeemForPurchase(tenantId, saved.getBusinessId(), saved.getCustomerId(),
+                pointsToRedeem, saved.getServicePrice(), "APPOINTMENT:" + saved.getId(),
+                "APPOINTMENT", saved.getId(), "Points applied to appointment booking");
+            saved.setLoyaltyPointsRedeemed(redemption.pointsRedeemed());
+            saved.setLoyaltyDiscountAmount(redemption.discountAmount());
+            saved = appointmentRepository.save(saved);
+        }
         String businessName = business.get().getName() == null ? "the business" : business.get().getName();
         String bookingMessage = "An appointment for " + saved.getServiceName() + " was booked with " + businessName + ".";
         if (businessUser) {
@@ -307,6 +331,7 @@ public class AppointmentController {
     }
 
     @PutMapping("/appointments/{id}/status")
+    @Transactional
     public ResponseEntity<Appointment> updateAppointmentStatus(@PathVariable Long id,
                                                                @RequestParam AppointmentStatus status,
                                                                @RequestBody(required = false) AppointmentStatusUpdateRequest request) {
@@ -353,6 +378,20 @@ public class AppointmentController {
             appointment.setBusinessNote(trimmedNote == null || trimmedNote.isEmpty() ? null : trimmedNote);
         }
         Appointment saved = appointmentRepository.save(appointment);
+        if (previousStatus != AppointmentStatus.COMPLETED && requestedStatus == AppointmentStatus.COMPLETED
+            && saved.getAppointmentServiceId() != null) {
+            loyaltyService.awardTargetIfConfigured(tenantId, saved.getBusinessId(), saved.getCustomerId(),
+                LoyaltyTargetType.SERVICE, saved.getAppointmentServiceId(),
+                "APPOINTMENT-EARN:" + saved.getId(), "APPOINTMENT", saved.getId(),
+                "Points earned for completed service");
+        }
+        if (previousStatus != AppointmentStatus.CANCELLED && requestedStatus == AppointmentStatus.CANCELLED
+            && saved.getLoyaltyPointsRedeemed() != null && saved.getLoyaltyPointsRedeemed() > 0) {
+            loyaltyService.record(tenantId, saved.getBusinessId(), LoyaltyEntryType.EARN,
+                new LoyaltyTransactionRequest(saved.getCustomerId(), saved.getLoyaltyPointsRedeemed(),
+                    "APPOINTMENT-CANCEL:" + saved.getId(), "APPOINTMENT_CANCEL", saved.getId(),
+                    "Points returned after appointment cancellation"));
+        }
         if (previousStatus != requestedStatus) {
             String statusLabel = requestedStatus.name().toLowerCase().replace('_', ' ');
             String message = "Your appointment for " + saved.getServiceName() + " was " + statusLabel + ".";

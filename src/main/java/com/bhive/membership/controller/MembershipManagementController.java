@@ -5,6 +5,8 @@ import com.bhive.business.service.BusinessMembershipService;
 import com.bhive.common.util.ProfileIdGenerator;
 import com.bhive.common.util.TenantContext;
 import com.bhive.notification.service.NotificationService;
+import com.bhive.loyalty.service.LoyaltyService;
+import com.bhive.loyalty.entity.LoyaltyTargetType;
 import com.bhive.customer.entity.BusinessCustomer;
 import com.bhive.customer.entity.CustomerProfile;
 import com.bhive.customer.repository.BusinessCustomerRepository;
@@ -50,6 +52,7 @@ public class MembershipManagementController {
     private final CustomerProfileRepository customerProfileRepository;
     private final com.bhive.business.repository.BusinessRepository businessRepository;
     private final NotificationService notificationService;
+    private final LoyaltyService loyaltyService;
 
     public MembershipManagementController(MembershipPlanRepository planRepository,
                                           MembershipRepository membershipRepository,
@@ -58,7 +61,8 @@ public class MembershipManagementController {
                                           BusinessCustomerRepository businessCustomerRepository,
                                           CustomerProfileRepository customerProfileRepository,
                                           com.bhive.business.repository.BusinessRepository businessRepository,
-                                          NotificationService notificationService) {
+                                          NotificationService notificationService,
+                                          LoyaltyService loyaltyService) {
         this.planRepository = planRepository;
         this.membershipRepository = membershipRepository;
         this.notificationRepository = notificationRepository;
@@ -67,6 +71,7 @@ public class MembershipManagementController {
         this.customerProfileRepository = customerProfileRepository;
         this.businessRepository = businessRepository;
         this.notificationService = notificationService;
+        this.loyaltyService = loyaltyService;
     }
 
     @GetMapping("/businesses/{businessId}/membership-plans")
@@ -133,7 +138,10 @@ public class MembershipManagementController {
         Long tenantId = TenantContext.getTenantId();
         Long userId = TenantContext.getUserId();
         if (!canManageBusiness(businessId, userId, tenantId)) return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
-        if (request == null || request.getPlanId() == null || request.getStartDate() == null) return ResponseEntity.badRequest().build();
+        if (request == null || request.getPlanId() == null || request.getStartDate() == null
+            || (request.getLoyaltyPointsToRedeem() != null && request.getLoyaltyPointsToRedeem() < 0)) {
+            return ResponseEntity.badRequest().build();
+        }
 
         Optional<MembershipPlan> planResult = planRepository.findByIdAndBusinessIdAndTenantId(request.getPlanId(), businessId, tenantId);
         if (planResult.isEmpty() || !planResult.get().isActive()) return ResponseEntity.badRequest().build();
@@ -161,6 +169,23 @@ public class MembershipManagementController {
         membership.setEndDate(request.getStartDate().plusMonths(plan.getDurationMonths()));
         membership.setStatus("PENDING".equals(paymentStatus) ? MembershipStatus.PENDING : MembershipStatus.ACTIVE);
         Membership saved = membershipRepository.save(membership);
+        int pointsToRedeem = request.getLoyaltyPointsToRedeem() == null ? 0 : request.getLoyaltyPointsToRedeem();
+        if (pointsToRedeem > 0) {
+            var redemption = loyaltyService.redeemForPurchase(tenantId, businessId, profile.getId(),
+                pointsToRedeem, plan.getPrice(), "MEMBERSHIP:" + saved.getId(),
+                "MEMBERSHIP", saved.getId(), "Points applied to " + saved.getPlanName() + " membership");
+            saved.setLoyaltyPointsRedeemed(redemption.pointsRedeemed());
+            saved.setLoyaltyDiscountAmount(redemption.discountAmount());
+            saved.setPrice(saved.getPrice().subtract(redemption.discountAmount()));
+            saved = membershipRepository.save(saved);
+        }
+        if ("PAID".equals(paymentStatus) && saved.getPlanId() != null) {
+            loyaltyService.awardTargetIfConfigured(tenantId, businessId, saved.getCustomerId(),
+                LoyaltyTargetType.MEMBERSHIP, saved.getPlanId(),
+                "MEMBERSHIP-EARN:" + saved.getId(), "MEMBERSHIP", saved.getId(),
+                "Points earned for paid membership");
+        }
+        Membership responseMembership = saved;
         Long recipientUserId = profile.getUserId();
         if (recipientUserId != null && !recipientUserId.equals(userId)) {
             notificationService.create(
@@ -168,11 +193,11 @@ public class MembershipManagementController {
                 recipientUserId,
                 "MEMBERSHIP_CREATED",
                 "Membership created",
-                "Your " + saved.getPlanName() + " membership is " + saved.getStatus().name().toLowerCase(Locale.ROOT) + ".",
+                "Your " + responseMembership.getPlanName() + " membership is " + responseMembership.getStatus().name().toLowerCase(Locale.ROOT) + ".",
                 "/dashboard"
             );
         }
-        return ResponseEntity.status(HttpStatus.CREATED).body(saved);
+        return ResponseEntity.status(HttpStatus.CREATED).body(responseMembership);
     }
 
     @PutMapping("/businesses/{businessId}/memberships/{membershipId}")
@@ -198,6 +223,7 @@ public class MembershipManagementController {
 
         Membership membership = membershipResult.get();
         MembershipPlan plan = planResult.get();
+        String previousPaymentStatus = membership.getPaymentStatus();
         if (!plan.isActive() && !plan.getId().equals(membership.getPlanId())) return ResponseEntity.badRequest().build();
         if (plan.getMaxMembers() != null && !plan.getId().equals(membership.getPlanId())
             && (request.getStatus() == MembershipStatus.ACTIVE || request.getStatus() == MembershipStatus.PENDING)) {
@@ -216,7 +242,15 @@ public class MembershipManagementController {
         membership.setEndDate(request.getEndDate() == null ? request.getStartDate().plusMonths(plan.getDurationMonths()) : request.getEndDate());
         membership.setPaymentStatus(paymentStatus);
         membership.setStatus(request.getStatus());
-        return ResponseEntity.ok(membershipRepository.save(membership));
+        Membership saved = membershipRepository.save(membership);
+        if (!"PAID".equalsIgnoreCase(previousPaymentStatus) && "PAID".equals(paymentStatus)
+            && saved.getPlanId() != null) {
+            loyaltyService.awardTargetIfConfigured(tenantId, businessId, saved.getCustomerId(),
+                LoyaltyTargetType.MEMBERSHIP, saved.getPlanId(),
+                "MEMBERSHIP-EARN:" + saved.getId(), "MEMBERSHIP", saved.getId(),
+                "Points earned for paid membership");
+        }
+        return ResponseEntity.ok(saved);
     }
 
     @GetMapping("/memberships/my")

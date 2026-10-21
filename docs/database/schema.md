@@ -31,3 +31,6 @@ All business-scoped tables should include tenant_id or business_id and must be f
 Apply `migrations/2026-09-29-membership-module.sql` before deploying membership management. Existing memberships are preserved; the new `payment_status` column defaults to `PENDING` and `plan_id` remains nullable for legacy rows.
 
 Apply `migrations/2026-09-29-location-discovery.sql` before deploying GPS registration and nearby-business discovery. Existing profile locations remain nullable until users provide an address or coordinates.
+
+Apply `migrations/2026-10-19-loyalty-points.sql` before deploying loyalty rules and point ledgers in production.
+Apply `migrations/2026-10-20-loyalty-redemption.sql` before deploying point redemption settings and checkout integration in production.

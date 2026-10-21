@@ -3,6 +3,7 @@ package com.bhive.appointment.entity;
 import jakarta.persistence.*;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import com.fasterxml.jackson.annotation.JsonProperty;
 
 @Entity
 @Table(name = "appointments")
@@ -29,6 +30,16 @@ public class Appointment {
 
     @Column(name = "service_price", precision = 12, scale = 2)
     private BigDecimal servicePrice;
+
+    @Column(name = "loyalty_points_redeemed", nullable = false)
+    private Integer loyaltyPointsRedeemed = 0;
+
+    @Column(name = "loyalty_discount_amount", nullable = false, precision = 12, scale = 2)
+    private BigDecimal loyaltyDiscountAmount = BigDecimal.ZERO;
+
+    @Transient
+    @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
+    private Integer loyaltyPointsToRedeem;
 
     @Column(name = "scheduled_at", nullable = false)
     private LocalDateTime scheduledAt;
@@ -123,6 +134,13 @@ public class Appointment {
     public void setServicePrice(BigDecimal servicePrice) {
         this.servicePrice = servicePrice;
     }
+
+    public Integer getLoyaltyPointsRedeemed() { return loyaltyPointsRedeemed; }
+    public void setLoyaltyPointsRedeemed(Integer loyaltyPointsRedeemed) { this.loyaltyPointsRedeemed = loyaltyPointsRedeemed; }
+    public BigDecimal getLoyaltyDiscountAmount() { return loyaltyDiscountAmount; }
+    public void setLoyaltyDiscountAmount(BigDecimal loyaltyDiscountAmount) { this.loyaltyDiscountAmount = loyaltyDiscountAmount; }
+    public Integer getLoyaltyPointsToRedeem() { return loyaltyPointsToRedeem; }
+    public void setLoyaltyPointsToRedeem(Integer loyaltyPointsToRedeem) { this.loyaltyPointsToRedeem = loyaltyPointsToRedeem; }
 
     public LocalDateTime getScheduledAt() {
         return scheduledAt;

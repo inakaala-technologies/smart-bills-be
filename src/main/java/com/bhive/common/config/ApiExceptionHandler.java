@@ -1,7 +1,8 @@
 package com.bhive.common.config;
 
 import java.time.Instant;
-import java.util.Map;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.FieldError;
@@ -13,6 +14,8 @@ import org.springframework.http.converter.HttpMessageNotReadableException;
 
 @RestControllerAdvice
 public class ApiExceptionHandler {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(ApiExceptionHandler.class);
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ApiError> handleValidation(MethodArgumentNotValidException exception) {
@@ -36,7 +39,8 @@ public class ApiExceptionHandler {
     }
 
     @ExceptionHandler(Exception.class)
-    public ResponseEntity<ApiError> handleUnexpectedException() {
+    public ResponseEntity<ApiError> handleUnexpectedException(Exception exception) {
+        LOGGER.error("Unhandled API exception", exception);
         return error(HttpStatus.INTERNAL_SERVER_ERROR, "An unexpected error occurred.");
     }
 

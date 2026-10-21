@@ -17,3 +17,4 @@ This folder contains the architecture, module design, API contracts, and databas
 - database/
 
 See [Location and Business Discovery](modules/location-discovery.md) for GPS registration, customer location updates, nearby business and offer discovery, and required migrations.
+See [Loyalty Points](modules/loyalty-module.md) for business-configured point rules, ledger workflows, APIs, and the required schema migration.

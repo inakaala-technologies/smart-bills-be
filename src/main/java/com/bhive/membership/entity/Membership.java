@@ -31,6 +31,12 @@ public class Membership {
     @Column(name = "price", nullable = false, precision = 10, scale = 2)
     private BigDecimal price = BigDecimal.ZERO;
 
+    @Column(name = "loyalty_points_redeemed", nullable = false)
+    private Integer loyaltyPointsRedeemed = 0;
+
+    @Column(name = "loyalty_discount_amount", nullable = false, precision = 12, scale = 2)
+    private BigDecimal loyaltyDiscountAmount = BigDecimal.ZERO;
+
     @Column(name = "payment_status", nullable = false, length = 20)
     private String paymentStatus = "PENDING";
 
@@ -116,6 +122,11 @@ public class Membership {
     public void setPrice(BigDecimal price) {
         this.price = price;
     }
+
+    public Integer getLoyaltyPointsRedeemed() { return loyaltyPointsRedeemed; }
+    public void setLoyaltyPointsRedeemed(Integer loyaltyPointsRedeemed) { this.loyaltyPointsRedeemed = loyaltyPointsRedeemed; }
+    public BigDecimal getLoyaltyDiscountAmount() { return loyaltyDiscountAmount; }
+    public void setLoyaltyDiscountAmount(BigDecimal loyaltyDiscountAmount) { this.loyaltyDiscountAmount = loyaltyDiscountAmount; }
 
     public String getPaymentStatus() {
         return paymentStatus;

@@ -15,6 +15,7 @@ public record InvoiceCreateRequest(
     LocalDate dueDate,
     @NotNull @DecimalMin("0.00") @Digits(integer = 8, fraction = 2) BigDecimal subtotal,
     @NotNull @DecimalMin("0.00") @Digits(integer = 8, fraction = 2) BigDecimal gstAmount,
-    @NotNull @DecimalMin("0.00") @Digits(integer = 8, fraction = 2) BigDecimal totalAmount
+    @NotNull @DecimalMin("0.00") @Digits(integer = 8, fraction = 2) BigDecimal totalAmount,
+    @jakarta.validation.constraints.PositiveOrZero Integer loyaltyPointsToRedeem
 ) {
 }

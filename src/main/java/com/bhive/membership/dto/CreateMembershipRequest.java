@@ -11,6 +11,7 @@ public class CreateMembershipRequest {
     private String phone;
     private LocalDate startDate;
     private String paymentStatus;
+    private Integer loyaltyPointsToRedeem;
 
     public Long getPlanId() { return planId; }
     public void setPlanId(Long planId) { this.planId = planId; }
@@ -26,4 +27,6 @@ public class CreateMembershipRequest {
     public void setStartDate(LocalDate startDate) { this.startDate = startDate; }
     public String getPaymentStatus() { return paymentStatus; }
     public void setPaymentStatus(String paymentStatus) { this.paymentStatus = paymentStatus; }
+    public Integer getLoyaltyPointsToRedeem() { return loyaltyPointsToRedeem; }
+    public void setLoyaltyPointsToRedeem(Integer loyaltyPointsToRedeem) { this.loyaltyPointsToRedeem = loyaltyPointsToRedeem; }
 }

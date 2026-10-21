@@ -16,6 +16,8 @@ public record InvoiceResponse(
     BigDecimal subtotal,
     BigDecimal gstAmount,
     BigDecimal totalAmount,
+    Integer loyaltyPointsRedeemed,
+    BigDecimal loyaltyDiscountAmount,
     InvoiceStatus status,
     LocalDateTime createdAt,
     LocalDateTime updatedAt
@@ -24,7 +26,8 @@ public record InvoiceResponse(
         return new InvoiceResponse(
             invoice.getId(), invoice.getBusinessId(), invoice.getCustomerId(), invoice.getInvoiceNumber(),
             invoice.getIssueDate(), invoice.getDueDate(), invoice.getSubtotal(), invoice.getGstAmount(),
-            invoice.getTotalAmount(), invoice.getStatus(), invoice.getCreatedAt(), invoice.getUpdatedAt()
+            invoice.getTotalAmount(), invoice.getLoyaltyPointsRedeemed(), invoice.getLoyaltyDiscountAmount(),
+            invoice.getStatus(), invoice.getCreatedAt(), invoice.getUpdatedAt()
         );
     }
 }

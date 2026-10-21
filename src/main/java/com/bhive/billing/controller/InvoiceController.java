@@ -12,6 +12,8 @@ import com.bhive.customer.entity.CustomerProfile;
 import com.bhive.customer.repository.BusinessCustomerRepository;
 import com.bhive.customer.repository.CustomerProfileRepository;
 import com.bhive.notification.service.NotificationService;
+import com.bhive.loyalty.service.LoyaltyService;
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Optional;
 import java.time.LocalDate;
@@ -20,6 +22,7 @@ import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.transaction.annotation.Transactional;
 
 @RestController
 @RequestMapping("/api/v1/billing")
@@ -30,17 +33,20 @@ public class InvoiceController {
     private final BusinessCustomerRepository businessCustomerRepository;
     private final CustomerProfileRepository customerProfileRepository;
     private final NotificationService notificationService;
+    private final LoyaltyService loyaltyService;
 
     public InvoiceController(InvoiceRepository invoiceRepository,
                             BusinessMembershipService businessMembershipService,
                             BusinessCustomerRepository businessCustomerRepository,
                             CustomerProfileRepository customerProfileRepository,
-                            NotificationService notificationService) {
+                            NotificationService notificationService,
+                            LoyaltyService loyaltyService) {
         this.invoiceRepository = invoiceRepository;
         this.businessMembershipService = businessMembershipService;
         this.businessCustomerRepository = businessCustomerRepository;
         this.customerProfileRepository = customerProfileRepository;
         this.notificationService = notificationService;
+        this.loyaltyService = loyaltyService;
     }
 
     private boolean canAccessInvoice(Long userId, Long tenantId, Invoice invoice) {
@@ -118,6 +124,7 @@ public class InvoiceController {
     }
 
     @PostMapping("/invoices")
+    @Transactional
     public ResponseEntity<InvoiceResponse> createInvoice(@Valid @RequestBody InvoiceCreateRequest request) {
         Long tenantId = TenantContext.getTenantId();
         Long userId = TenantContext.getUserId();
@@ -157,7 +164,18 @@ public class InvoiceController {
         invoice.setTotalAmount(request.totalAmount());
         invoice.setStatus(request.status());
         Invoice saved = invoiceRepository.save(invoice);
-        if (saved.getStatus() == InvoiceStatus.SENT) {
+        int pointsToRedeem = request.loyaltyPointsToRedeem() == null ? 0 : request.loyaltyPointsToRedeem();
+        if (pointsToRedeem > 0) {
+            var redemption = loyaltyService.redeemForPurchase(tenantId, saved.getBusinessId(), saved.getCustomerId(),
+                pointsToRedeem, saved.getTotalAmount(), "INVOICE:" + saved.getId(),
+                "INVOICE", saved.getId(), "Points applied to invoice " + saved.getInvoiceNumber());
+            saved.setLoyaltyPointsRedeemed(redemption.pointsRedeemed());
+            saved.setLoyaltyDiscountAmount(redemption.discountAmount());
+            saved.setTotalAmount(saved.getTotalAmount().subtract(redemption.discountAmount()));
+            saved = invoiceRepository.save(saved);
+        }
+        Invoice responseInvoice = saved;
+        if (responseInvoice.getStatus() == InvoiceStatus.SENT) {
             customer.map(CustomerProfile::getUserId)
                 .filter(recipientUserId -> recipientUserId != null && !recipientUserId.equals(userId))
                 .ifPresent(recipientUserId -> notificationService.create(
@@ -165,11 +183,11 @@ public class InvoiceController {
                     recipientUserId,
                     "INVOICE_CREATED",
                     "New invoice",
-                    "Invoice " + saved.getInvoiceNumber() + " is ready to review.",
+                    "Invoice " + responseInvoice.getInvoiceNumber() + " is ready to review.",
                     "/dashboard"
                 ));
         }
-        return ResponseEntity.ok(InvoiceResponse.from(saved));
+        return ResponseEntity.ok(InvoiceResponse.from(responseInvoice));
     }
 
     @PatchMapping("/invoices/{id}/status")

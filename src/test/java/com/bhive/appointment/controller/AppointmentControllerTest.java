@@ -16,6 +16,7 @@ import com.bhive.customer.entity.CustomerProfile;
 import com.bhive.customer.repository.BusinessCustomerRepository;
 import com.bhive.customer.repository.CustomerProfileRepository;
 import com.bhive.notification.service.NotificationService;
+import com.bhive.loyalty.service.LoyaltyService;
 import java.time.LocalDateTime;
 import java.time.LocalDate;
 import java.util.List;
@@ -68,6 +69,9 @@ class AppointmentControllerTest {
 
     @MockBean
     private NotificationService notificationService;
+
+    @MockBean
+    private LoyaltyService loyaltyService;
 
     @BeforeEach
     void setTenantContext() {
