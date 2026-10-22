@@ -24,7 +24,6 @@ import java.time.LocalDate;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
-import jakarta.transaction.Transactional;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
