@@ -133,7 +133,8 @@ public class InvoiceController {
         if (request.totalAmount().compareTo(request.subtotal().add(request.gstAmount())) != 0) {
             return ResponseEntity.badRequest().build();
         }
-        if (request.status() != InvoiceStatus.DRAFT && request.status() != InvoiceStatus.SENT) {
+        if ((request.status() != InvoiceStatus.DRAFT && request.status() != InvoiceStatus.SENT && request.status() != InvoiceStatus.PAID)
+            || (request.status() == InvoiceStatus.PAID && request.dueDate() != null)) {
             return ResponseEntity.badRequest().build();
         }
         Optional<CustomerProfile> customer = customerProfileRepository.findById(request.customerId())

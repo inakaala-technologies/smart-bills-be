@@ -213,17 +213,46 @@ class InvoiceControllerTest {
 		Mockito.verify(invoiceRepository, Mockito.never()).save(Mockito.any(Invoice.class));
 	}
 
-	@Test
-	void createInvoiceShouldRejectPaidInitialStatus() throws Exception {
-		TenantContext.setTenantId(10L);
-		TenantContext.setUserId(20L);
-		Mockito.when(businessMembershipService.userHasAccessToBusiness(20L, 1L, 10L)).thenReturn(true);
+    @Test
+    void createPaidInvoiceWithoutDueDateShouldPersistPaidStatus() throws Exception {
+        TenantContext.setTenantId(10L);
+        TenantContext.setUserId(20L);
+        Mockito.when(businessMembershipService.userHasAccessToBusiness(20L, 1L, 10L)).thenReturn(true);
+        Mockito.when(businessCustomerRepository.findByBusinessIdAndCustomerProfileId(1L, 2L))
+            .thenReturn(Optional.of(new BusinessCustomer()));
+        Mockito.when(invoiceRepository.save(Mockito.any(Invoice.class)))
+            .thenAnswer(invocation -> invocation.getArgument(0));
+        CustomerProfile customer = new CustomerProfile();
+        customer.setId(2L);
+        customer.setTenantId(10L);
+        Mockito.when(customerProfileRepository.findById(2L)).thenReturn(Optional.of(customer));
 
-		mockMvc.perform(post("/api/v1/billing/invoices").contentType(MediaType.APPLICATION_JSON).content(
-				"{\"businessId\":1,\"customerId\":2,\"status\":\"PAID\",\"subtotal\":100.00,\"gstAmount\":18.00,\"totalAmount\":118.00}"))
-				.andExpect(status().isBadRequest());
+        mockMvc.perform(post("/api/v1/billing/invoices")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"businessId\":1,\"customerId\":2,\"status\":\"PAID\",\"subtotal\":100.00,\"gstAmount\":18.00,\"totalAmount\":118.00}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.status").value("PAID"))
+            .andExpect(jsonPath("$.dueDate").doesNotExist());
 
-		Mockito.verify(invoiceRepository, Mockito.never()).save(Mockito.any(Invoice.class));
+        ArgumentCaptor<Invoice> invoiceCaptor = ArgumentCaptor.forClass(Invoice.class);
+        Mockito.verify(invoiceRepository).save(invoiceCaptor.capture());
+        org.junit.jupiter.api.Assertions.assertEquals(InvoiceStatus.PAID, invoiceCaptor.getValue().getStatus());
+        org.junit.jupiter.api.Assertions.assertNull(invoiceCaptor.getValue().getDueDate());
+        verify(notificationService, Mockito.never()).create(
+            Mockito.anyLong(), Mockito.anyLong(), Mockito.anyString(), Mockito.anyString(), Mockito.anyString(), Mockito.anyString()
+        );
+    }
+
+    @Test
+    void createPaidInvoiceShouldRejectDueDate() throws Exception {
+        TenantContext.setTenantId(10L);
+        TenantContext.setUserId(20L);
+        Mockito.when(businessMembershipService.userHasAccessToBusiness(20L, 1L, 10L)).thenReturn(true);
+
+        mockMvc.perform(post("/api/v1/billing/invoices")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"businessId\":1,\"customerId\":2,\"status\":\"PAID\",\"dueDate\":\"" + LocalDate.now().plusDays(7) + "\",\"subtotal\":100.00,\"gstAmount\":18.00,\"totalAmount\":118.00}"))
+            .andExpect(status().isBadRequest());
 	}
 
 	@Test
