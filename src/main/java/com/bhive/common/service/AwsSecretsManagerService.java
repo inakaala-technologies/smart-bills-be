@@ -4,6 +4,8 @@ import com.bhive.common.config.DatabaseCredentials;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+
+import org.json.JSONObject;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import software.amazon.awssdk.core.exception.SdkException;
@@ -14,95 +16,99 @@ import software.amazon.awssdk.services.secretsmanager.model.GetSecretValueRespon
 @Service
 public class AwsSecretsManagerService {
 
-    private final SecretsManagerClient secretsManagerClient;
-    private final ObjectMapper objectMapper;
+	private final SecretsManagerClient secretsManagerClient;
+	private final ObjectMapper objectMapper;
 
-    public AwsSecretsManagerService(
-        SecretsManagerClient secretsManagerClient,
-        ObjectMapper objectMapper
-    ) {
-        this.secretsManagerClient = secretsManagerClient;
-        this.objectMapper = objectMapper;
-    }
+	public AwsSecretsManagerService(SecretsManagerClient secretsManagerClient, ObjectMapper objectMapper) {
+		this.secretsManagerClient = secretsManagerClient;
+		this.objectMapper = objectMapper;
+	}
 
-    public DatabaseCredentials getDatabaseCredentials(String secretId) {
-        if (!StringUtils.hasText(secretId)) {
-            throw new IllegalArgumentException("The database secret ID must be configured.");
-        }
+	public DatabaseCredentials getDatabaseCredentials(String secretId) {
+		if (!StringUtils.hasText(secretId)) {
+			throw new IllegalArgumentException("The database secret ID must be configured.");
+		}
 
-        GetSecretValueResponse response;
-        try {
-            response = secretsManagerClient.getSecretValue(
-                GetSecretValueRequest.builder().secretId(secretId).build()
-            );
-        } catch (SdkException exception) {
-            throw new SecretRetrievalException(
-                "Unable to retrieve database secret '" + secretId + "' from AWS Secrets Manager.",
-                exception
-            );
-        }
+		GetSecretValueResponse response;
+		try {
+			response = secretsManagerClient.getSecretValue(GetSecretValueRequest.builder().secretId(secretId).build());
+		} catch (SdkException exception) {
+			throw new SecretRetrievalException(
+					"Unable to retrieve database secret '" + secretId + "' from AWS Secrets Manager.", exception);
+		}
 
-        if (response == null || !StringUtils.hasText(response.secretString())) {
-            throw new InvalidSecretException(
-                "Database secret '" + secretId + "' must contain a JSON secret string."
-            );
-        }
+		if (response == null || !StringUtils.hasText(response.secretString())) {
+			throw new InvalidSecretException("Database secret '" + secretId + "' must contain a JSON secret string.");
+		}
 
-        JsonNode secretJson;
-        try {
-            secretJson = objectMapper.readTree(response.secretString());
-        } catch (JsonProcessingException exception) {
-            throw new InvalidSecretException(
-                "Database secret '" + secretId + "' must contain valid JSON.",
-                exception
-            );
-        }
+		JsonNode secretJson;
+		try {
+			secretJson = objectMapper.readTree(response.secretString());
+		} catch (JsonProcessingException exception) {
+			throw new InvalidSecretException("Database secret '" + secretId + "' must contain valid JSON.", exception);
+		}
 
-        if (secretJson == null || !secretJson.isObject()) {
-            throw new InvalidSecretException(
-                "Database secret '" + secretId + "' must be a JSON object."
-            );
-        }
+		if (secretJson == null || !secretJson.isObject()) {
+			throw new InvalidSecretException("Database secret '" + secretId + "' must be a JSON object.");
+		}
 
-        String url = requiredText(secretJson, "url", secretId);
-        if (!url.startsWith("jdbc:mysql:")) {
-            throw new InvalidSecretException(
-                "Database secret '" + secretId + "' must contain a MySQL JDBC URL."
-            );
-        }
+		String url = requiredText(secretJson, "url", secretId);
+		if (!url.startsWith("jdbc:mysql:")) {
+			throw new InvalidSecretException("Database secret '" + secretId + "' must contain a MySQL JDBC URL.");
+		}
 
-        return new DatabaseCredentials(
-            url,
-            requiredText(secretJson, "username", secretId),
-            requiredText(secretJson, "password", secretId)
-        );
-    }
+		return new DatabaseCredentials(url, requiredText(secretJson, "username", secretId),
+				requiredText(secretJson, "password", secretId));
+	}
 
-    private String requiredText(JsonNode secretJson, String field, String secretId) {
-        JsonNode value = secretJson.get(field);
-        if (value == null || !value.isTextual() || !StringUtils.hasText(value.asText())) {
-            throw new InvalidSecretException(
-                "Database secret '" + secretId + "' is missing a non-empty '" + field + "' field."
-            );
-        }
-        return value.asText().trim();
-    }
+	private String requiredText(JsonNode secretJson, String field, String secretId) {
+		JsonNode value = secretJson.get(field);
+		if (value == null || !value.isTextual() || !StringUtils.hasText(value.asText())) {
+			throw new InvalidSecretException(
+					"Database secret '" + secretId + "' is missing a non-empty '" + field + "' field.");
+		}
+		return value.asText().trim();
+	}
 
-    public static final class SecretRetrievalException extends IllegalStateException {
+	public static final class SecretRetrievalException extends IllegalStateException {
 
-        public SecretRetrievalException(String message, Throwable cause) {
-            super(message, cause);
-        }
-    }
+		public SecretRetrievalException(String message, Throwable cause) {
+			super(message, cause);
+		}
+	}
 
-    public static final class InvalidSecretException extends IllegalStateException {
+	public static final class InvalidSecretException extends IllegalStateException {
 
-        public InvalidSecretException(String message) {
-            super(message);
-        }
+		public InvalidSecretException(String message) {
+			super(message);
+		}
 
-        public InvalidSecretException(String message, Throwable cause) {
-            super(message, cause);
-        }
-    }
+		public InvalidSecretException(String message, Throwable cause) {
+			super(message, cause);
+		}
+	}
+
+	public JSONObject getSecretAsJson(String secretId) {
+		if (!StringUtils.hasText(secretId)) {
+			throw new IllegalArgumentException("The secret ID must be configured.");
+		}
+
+		GetSecretValueResponse response;
+		try {
+			response = secretsManagerClient.getSecretValue(GetSecretValueRequest.builder().secretId(secretId).build());
+		} catch (SdkException exception) {
+			throw new SecretRetrievalException("Unable to retrieve secret '" + secretId + "' from AWS Secrets Manager.",
+					exception);
+		}
+
+		if (response == null || !StringUtils.hasText(response.secretString())) {
+			throw new InvalidSecretException("Secret '" + secretId + "' must contain a JSON secret string.");
+		}
+
+		try {
+			return new JSONObject(response.secretString());
+		} catch (org.json.JSONException exception) {
+			throw new InvalidSecretException("Secret '" + secretId + "' must contain valid JSON.", exception);
+		}
+	}
 }
