@@ -43,151 +43,168 @@ import org.springframework.http.ResponseEntity;
 @ExtendWith(MockitoExtension.class)
 class BusinessOfferControllerTest {
 
-    @Mock
-    private BusinessOfferRepository offerRepository;
+	@Mock
+	private BusinessOfferRepository offerRepository;
 
-    @Mock
-    private BusinessRepository businessRepository;
+	@Mock
+	private BusinessRepository businessRepository;
 
-    @Mock
-    private BusinessUserRepository businessUserRepository;
+	@Mock
+	private BusinessUserRepository businessUserRepository;
 
-    @Mock
-    private BusinessCustomerRepository businessCustomerRepository;
+	@Mock
+	private BusinessCustomerRepository businessCustomerRepository;
 
-    @Mock
-    private CustomerProfileRepository customerProfileRepository;
+	@Mock
+	private CustomerProfileRepository customerProfileRepository;
 
-    @Mock
-    private InvoiceRepository invoiceRepository;
+	@Mock
+	private InvoiceRepository invoiceRepository;
 
-    @Mock
-    private PaymentRepository paymentRepository;
+	@Mock
+	private PaymentRepository paymentRepository;
 
-    @Mock
-    private MembershipRepository membershipRepository;
+	@Mock
+	private MembershipRepository membershipRepository;
 
-    @Mock
-    private AppointmentRepository appointmentRepository;
+	@Mock
+	private AppointmentRepository appointmentRepository;
 
-    @Mock
-    private NotificationService notificationService;
+	@Mock
+	private NotificationService notificationService;
 
-    @InjectMocks
-    private BusinessOfferController controller;
+	@InjectMocks
+	private BusinessOfferController controller;
 
-    @AfterEach
-    void clearTenantContext() {
-        TenantContext.clear();
-    }
+	@AfterEach
+	void clearTenantContext() {
+		TenantContext.clear();
+	}
 
-    @Test
-    void businessOwnerCanPublishOffer() {
-        Business business = business(10L, 3L, 12.0, 77.0);
-        BusinessUser owner = new BusinessUser();
-        owner.setBusinessId(10L);
-        owner.setTenantId(3L);
-        owner.setUserId(7L);
-        owner.setStatus("ACTIVE");
-        when(businessRepository.findById(10L)).thenReturn(Optional.of(business));
-        when(businessUserRepository.findByUserIdAndTenantId(7L, 3L)).thenReturn(List.of(owner));
-        when(offerRepository.save(any(BusinessOffer.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        TenantContext.setTenantId(3L);
-        TenantContext.setUserId(7L);
+	@Test
+	void businessOwnerCanPublishOffer() {
+		Business business = business(10L, 3L, 12.0, 77.0);
 
-        BusinessOfferRequest request = new BusinessOfferRequest(
-            "Lunch special", "Weekday lunch deal", "20% off",
-            LocalDateTime.of(2026, 9, 29, 0, 0), LocalDateTime.of(2026, 10, 6, 23, 59),
-            com.bhive.business.entity.CustomerSegment.ALL
-        );
-        ResponseEntity<?> response = controller.createOffer(10L, request);
+		BusinessUser owner = new BusinessUser();
+		owner.setBusinessId(10L);
+		owner.setTenantId(3L);
+		owner.setUserId(7L);
+		owner.setStatus("ACTIVE");
 
-        assertEquals(HttpStatus.CREATED, response.getStatusCode());
-        BusinessOffer created = (BusinessOffer) response.getBody();
-        assertNotNull(created);
-        assertEquals(10L, created.getBusinessId());
-        assertEquals("20% off", created.getDiscountLabel());
-    }
+		when(businessRepository.findById(10L)).thenReturn(Optional.of(business));
 
-    @Test
-    void nearbyOffersIncludeBusinessDistance() {
-        Business business = business(10L, 3L, 12.0, 77.0);
-        BusinessOffer offer = new BusinessOffer();
-        offer.setId(22L);
-        offer.setTenantId(3L);
-        offer.setBusinessId(10L);
-        offer.setTitle("Lunch special");
-        offer.setDiscountLabel("20% off");
-        offer.setStartsAt(LocalDateTime.now().minusDays(1));
-        offer.setEndsAt(LocalDateTime.now().plusDays(1));
-        when(businessRepository.findByStatusAndLatitudeIsNotNullAndLongitudeIsNotNull(BusinessStatus.ACTIVE))
-            .thenReturn(List.of(business));
-        when(offerRepository.findByBusinessIdInAndActiveTrueAndStartsAtLessThanEqualAndEndsAtGreaterThanEqual(
-            anyCollection(), any(LocalDateTime.class), any(LocalDateTime.class)
-        )).thenReturn(List.of(offer));
+		when(businessUserRepository.findByUserIdAndTenantId(7L, 3L)).thenReturn(List.of(owner));
 
-        ResponseEntity<List<NearbyOfferSummary>> response = controller.getNearbyOffers(12.0, 77.0, 25);
+		when(offerRepository.save(any(BusinessOffer.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        assertEquals(HttpStatus.OK, response.getStatusCode());
-        assertNotNull(response.getBody());
-        assertEquals(1, response.getBody().size());
-        assertEquals("Lunch special", response.getBody().get(0).title());
-        assertEquals("Local business", response.getBody().get(0).businessName());
-        assertEquals(0.0, response.getBody().get(0).distanceKm());
-    }
+		TenantContext.setTenantId(3L);
+		TenantContext.setUserId(7L);
 
-    @Test
-    void loyalSegmentOfferNotifiesOnlyEligibleCustomer() {
-        Business business = business(10L, 3L, 12.0, 77.0);
-        BusinessUser owner = new BusinessUser();
-        owner.setBusinessId(10L);
-        owner.setTenantId(3L);
-        owner.setUserId(7L);
-        owner.setStatus("ACTIVE");
-        BusinessCustomer link = new BusinessCustomer();
-        link.setBusinessId(10L);
-        link.setTenantId(3L);
-        link.setCustomerProfileId(23L);
-        CustomerProfile customer = new CustomerProfile();
-        customer.setId(23L);
-        customer.setTenantId(3L);
-        customer.setUserId(91L);
-        Payment payment = new Payment();
-        payment.setCustomerId(23L);
-        payment.setStatus(PaymentStatus.VERIFIED);
-        payment.setAmount(new java.math.BigDecimal("10000.00"));
+		BusinessOfferRequest request = new BusinessOfferRequest("Lunch special", "Weekday lunch deal", "20% off",
+				LocalDateTime.of(2026, 9, 29, 0, 0), LocalDateTime.of(2026, 10, 6, 23, 59), CustomerSegment.ALL);
 
-        when(businessRepository.findById(10L)).thenReturn(Optional.of(business));
-        when(businessUserRepository.findByUserIdAndTenantId(7L, 3L)).thenReturn(List.of(owner));
-        when(businessCustomerRepository.findByTenantIdAndBusinessId(3L, 10L)).thenReturn(List.of(link));
-        when(customerProfileRepository.findById(23L)).thenReturn(Optional.of(customer));
-        when(paymentRepository.findByBusinessId(10L)).thenReturn(List.of(payment));
-        when(offerRepository.save(any(BusinessOffer.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        TenantContext.setTenantId(3L);
-        TenantContext.setUserId(7L);
+		ResponseEntity<?> response = controller.createOffer(10L, request, null);
 
-        BusinessOfferRequest request = new BusinessOfferRequest(
-            "Loyal customer special", "Thank you for staying with us", "₹500 reward",
-            LocalDateTime.now().minusMinutes(1), LocalDateTime.now().plusDays(7), CustomerSegment.LOYAL
-        );
-        ResponseEntity<?> response = controller.createOffer(10L, request);
+		assertEquals(HttpStatus.CREATED, response.getStatusCode());
 
-        assertEquals(HttpStatus.CREATED, response.getStatusCode());
-        assertEquals(CustomerSegment.LOYAL, ((BusinessOffer) response.getBody()).getTargetSegment());
-        org.mockito.Mockito.verify(notificationService).create(
-            3L, 91L, "TARGETED_OFFER", "Loyal customer special",
-            "₹500 reward: Thank you for staying with us", "/dashboard"
-        );
-    }
+		BusinessOffer created = (BusinessOffer) response.getBody();
 
-    private Business business(Long id, Long tenantId, double latitude, double longitude) {
-        Business business = new Business();
-        business.setId(id);
-        business.setTenantId(tenantId);
-        business.setName("Local business");
-        business.setLatitude(latitude);
-        business.setLongitude(longitude);
-        business.setStatus(BusinessStatus.ACTIVE);
-        return business;
-    }
+		assertNotNull(created);
+		assertEquals(10L, created.getBusinessId());
+		assertEquals("20% off", created.getDiscountLabel());
+	}
+
+	@Test
+	void nearbyOffersIncludeBusinessDistance() {
+		Business business = business(10L, 3L, 12.0, 77.0);
+		BusinessOffer offer = new BusinessOffer();
+		offer.setId(22L);
+		offer.setTenantId(3L);
+		offer.setBusinessId(10L);
+		offer.setTitle("Lunch special");
+		offer.setDiscountLabel("20% off");
+		offer.setStartsAt(LocalDateTime.now().minusDays(1));
+		offer.setEndsAt(LocalDateTime.now().plusDays(1));
+		when(businessRepository.findByStatusAndLatitudeIsNotNullAndLongitudeIsNotNull(BusinessStatus.ACTIVE))
+				.thenReturn(List.of(business));
+		when(offerRepository.findByBusinessIdInAndActiveTrueAndStartsAtLessThanEqualAndEndsAtGreaterThanEqual(
+				anyCollection(), any(LocalDateTime.class), any(LocalDateTime.class))).thenReturn(List.of(offer));
+
+		ResponseEntity<List<NearbyOfferSummary>> response = controller.getNearbyOffers(12.0, 77.0, 25);
+
+		assertEquals(HttpStatus.OK, response.getStatusCode());
+		assertNotNull(response.getBody());
+		assertEquals(1, response.getBody().size());
+		assertEquals("Lunch special", response.getBody().get(0).title());
+		assertEquals("Local business", response.getBody().get(0).businessName());
+		assertEquals(0.0, response.getBody().get(0).distanceKm());
+	}
+
+	@Test
+	void loyalSegmentOfferNotifiesOnlyEligibleCustomer() {
+		Business business = business(10L, 3L, 12.0, 77.0);
+
+		BusinessUser owner = new BusinessUser();
+		owner.setBusinessId(10L);
+		owner.setTenantId(3L);
+		owner.setUserId(7L);
+		owner.setStatus("ACTIVE");
+
+		BusinessCustomer link = new BusinessCustomer();
+		link.setBusinessId(10L);
+		link.setTenantId(3L);
+		link.setCustomerProfileId(23L);
+
+		CustomerProfile customer = new CustomerProfile();
+		customer.setId(23L);
+		customer.setTenantId(3L);
+		customer.setUserId(91L);
+
+		Payment payment = new Payment();
+		payment.setCustomerId(23L);
+		payment.setStatus(PaymentStatus.VERIFIED);
+		payment.setAmount(new java.math.BigDecimal("10000.00"));
+
+		when(businessRepository.findById(10L)).thenReturn(Optional.of(business));
+
+		when(businessUserRepository.findByUserIdAndTenantId(7L, 3L)).thenReturn(List.of(owner));
+
+		when(businessCustomerRepository.findByTenantIdAndBusinessId(3L, 10L)).thenReturn(List.of(link));
+
+		when(customerProfileRepository.findById(23L)).thenReturn(Optional.of(customer));
+
+		when(paymentRepository.findByBusinessId(10L)).thenReturn(List.of(payment));
+
+		when(offerRepository.save(any(BusinessOffer.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+		TenantContext.setTenantId(3L);
+		TenantContext.setUserId(7L);
+
+		BusinessOfferRequest request = new BusinessOfferRequest("Loyal customer special",
+				"Thank you for staying with us", "₹500 reward", LocalDateTime.now().minusMinutes(1),
+				LocalDateTime.now().plusDays(7), CustomerSegment.LOYAL);
+
+		ResponseEntity<?> response = controller.createOffer(10L, request, null);
+
+		assertEquals(HttpStatus.CREATED, response.getStatusCode());
+
+		BusinessOffer created = (BusinessOffer) response.getBody();
+
+		assertNotNull(created);
+		assertEquals(CustomerSegment.LOYAL, created.getTargetSegment());
+
+		org.mockito.Mockito.verify(notificationService).create(3L, 91L, "TARGETED_OFFER", "Loyal customer special",
+				"₹500 reward: Thank you for staying with us", "/dashboard");
+	}
+
+	private Business business(Long id, Long tenantId, double latitude, double longitude) {
+		Business business = new Business();
+		business.setId(id);
+		business.setTenantId(tenantId);
+		business.setName("Local business");
+		business.setLatitude(latitude);
+		business.setLongitude(longitude);
+		business.setStatus(BusinessStatus.ACTIVE);
+		return business;
+	}
 }
