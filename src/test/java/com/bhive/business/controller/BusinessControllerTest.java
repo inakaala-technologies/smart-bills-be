@@ -188,9 +188,14 @@ class BusinessControllerTest {
         verifiedPayment.setInvoiceId(101L);
         verifiedPayment.setStatus(PaymentStatus.VERIFIED);
         verifiedPayment.setAmount(new BigDecimal("50.00"));
+        Payment unverifiedPayment = new Payment();
+        unverifiedPayment.setBusinessId(101L);
+        unverifiedPayment.setInvoiceId(101L);
+        unverifiedPayment.setStatus(PaymentStatus.PENDING);
+        unverifiedPayment.setAmount(new BigDecimal("25.00"));
         when(businessUserRepository.findByUserIdAndTenantId(15L, 7L)).thenReturn(List.of(user));
         when(invoiceRepository.findAll()).thenReturn(List.of(invoice, paidInvoice));
-        when(paymentRepository.findAll()).thenReturn(List.of(verifiedPayment));
+        when(paymentRepository.findAll()).thenReturn(List.of(verifiedPayment, unverifiedPayment));
         when(appointmentRepository.findAll()).thenReturn(List.of());
         when(businessCustomerRepository.findAll()).thenReturn(List.of());
         when(customerProfileRepository.findAll()).thenReturn(List.of());
@@ -207,6 +212,8 @@ class BusinessControllerTest {
         assertEquals(200.0, trendValueAt(monthly, 5));
         assertEquals(200.0, ((Number) monthly.get("billableRevenue")).doubleValue());
         assertEquals(125.0, ((Number) monthly.get("completedRevenue")).doubleValue());
+        assertEquals(75.0, ((Number) monthly.get("pendingPayments")).doubleValue());
+        assertEquals(1L, ((Number) monthly.get("pendingPaymentCount")).longValue());
     }
 
     private double trendValueAt(java.util.Map<String, Object> summary, int index) {

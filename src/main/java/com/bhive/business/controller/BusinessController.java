@@ -230,12 +230,6 @@ public class BusinessController {
             .filter(Objects::nonNull)
             .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-        BigDecimal pendingPayments = payments.stream()
-            .filter(payment -> payment.getStatus() != null && payment.getStatus().name().equalsIgnoreCase("PENDING"))
-            .map(Payment::getAmount)
-            .filter(Objects::nonNull)
-            .reduce(BigDecimal.ZERO, BigDecimal::add);
-
         List<Invoice> billableInvoices = invoices.stream()
             .filter(invoice -> invoice.getStatus() != InvoiceStatus.DRAFT && invoice.getStatus() != InvoiceStatus.CANCELLED)
             .toList();
@@ -247,7 +241,17 @@ public class BusinessController {
         Map<Long, BigDecimal> verifiedPaymentsByInvoice = payments.stream()
             .filter(payment -> payment.getStatus() != null && payment.getStatus().name().equalsIgnoreCase("VERIFIED"))
             .filter(payment -> payment.getInvoiceId() != null && payment.getAmount() != null)
-            .collect(Collectors.toMap(Payment::getInvoiceId, Payment::getAmount, BigDecimal::add));
+            .collect(Collectors.toMap(
+                Payment::getInvoiceId,
+                payment -> payment.getAmount().max(BigDecimal.ZERO),
+                BigDecimal::add
+            ));
+        BigDecimal pendingPayments = billableInvoices.stream()
+            .map(invoice -> outstandingInvoiceAmount(invoice, verifiedPaymentsByInvoice))
+            .reduce(BigDecimal.ZERO, BigDecimal::add);
+        long pendingPaymentCount = billableInvoices.stream()
+            .filter(invoice -> outstandingInvoiceAmount(invoice, verifiedPaymentsByInvoice).signum() > 0)
+            .count();
         BigDecimal completedRevenue = billableInvoices.stream()
             .map(invoice -> {
                 BigDecimal invoiceAmount = invoice.getTotalAmount() == null
@@ -303,6 +307,7 @@ public class BusinessController {
         summary.put("completedRevenue", completedRevenue.doubleValue());
         summary.put("activeMembers", (long) activeCustomers.size());
         summary.put("pendingPayments", pendingPayments.doubleValue());
+        summary.put("pendingPaymentCount", pendingPaymentCount);
         summary.put("newCustomers", newCustomers);
         summary.put("invoiceCount", invoices.size());
         summary.put("appointmentCount", appointments.size());
@@ -310,6 +315,18 @@ public class BusinessController {
         summary.put("upcomingRenewals", upcomingRenewals);
         summary.put("revenueTrend", revenueTrend);
         return summary;
+    }
+
+    private BigDecimal outstandingInvoiceAmount(Invoice invoice, Map<Long, BigDecimal> verifiedPaymentsByInvoice) {
+        BigDecimal invoiceAmount = invoice.getTotalAmount() == null
+            ? BigDecimal.ZERO
+            : invoice.getTotalAmount().max(BigDecimal.ZERO);
+        if (invoice.getStatus() == InvoiceStatus.PAID) return BigDecimal.ZERO;
+
+        BigDecimal verifiedAmount = invoice.getId() == null
+            ? BigDecimal.ZERO
+            : verifiedPaymentsByInvoice.getOrDefault(invoice.getId(), BigDecimal.ZERO).max(BigDecimal.ZERO);
+        return invoiceAmount.subtract(verifiedAmount.min(invoiceAmount)).max(BigDecimal.ZERO);
     }
 
     private List<Map<String, Object>> buildRevenueTrend(List<Invoice> invoices, String interval, LocalDate today) {
@@ -366,6 +383,7 @@ public class BusinessController {
         empty.put("completedRevenue", 0d);
         empty.put("activeMembers", 0L);
         empty.put("pendingPayments", 0d);
+        empty.put("pendingPaymentCount", 0L);
         empty.put("newCustomers", 0L);
         empty.put("invoiceCount", 0);
         empty.put("appointmentCount", 0);
