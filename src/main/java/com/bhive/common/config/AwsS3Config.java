@@ -24,7 +24,7 @@ public class AwsS3Config {
 
 	@Bean
 	public S3Client s3Client() {
-		String secretName = profile + "/ts/s3";
+		String secretName = profile + "/bhive/s3";
 		JSONObject secretJson = secretsService.getSecretAsJson(secretName);
 		String region = secretJson.getString("s3Region");
 		String accessKey = secretJson.getString("s3AccessKey");

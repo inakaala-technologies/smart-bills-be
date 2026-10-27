@@ -47,7 +47,7 @@ public class S3ImageUploadService {
 
 	public String uploadBase64Image(String base64Image, String id) {
 		try {
-			String secretName = profile + "/ts/s3";
+			String secretName = profile + "/bhive/s3";
 			JSONObject secretJson = secretsService.getSecretAsJson(secretName);
 			String region = secretJson.getString("s3Region");
 			String bucketName = secretJson.getString("s3BucketName");
@@ -115,7 +115,7 @@ public class S3ImageUploadService {
 
 		try {
 			// Retrieve the S3 region from the existing secret.
-			String secretName = profile + "/ts/s3";
+			String secretName = profile + "/bhive/s3";
 
 			JSONObject secretJson = secretsService.getSecretAsJson(secretName);
 			String region = secretJson.getString("s3Region");

@@ -10,6 +10,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.bhive.billing.entity.Invoice;
+import com.bhive.billing.entity.InvoiceStatus;
 import com.bhive.billing.repository.InvoiceRepository;
 import com.bhive.business.entity.Business;
 import com.bhive.business.entity.BusinessStatus;
@@ -17,11 +18,16 @@ import com.bhive.business.entity.BusinessUser;
 import com.bhive.business.repository.BusinessRepository;
 import com.bhive.business.repository.BusinessUserRepository;
 import com.bhive.common.util.TenantContext;
+import com.bhive.appointment.repository.AppointmentRepository;
 import com.bhive.customer.repository.BusinessCustomerRepository;
 import com.bhive.customer.entity.CustomerProfile;
 import com.bhive.customer.repository.CustomerProfileRepository;
+import com.bhive.payment.entity.Payment;
+import com.bhive.payment.entity.PaymentStatus;
+import com.bhive.payment.repository.PaymentRepository;
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.AfterEach;
@@ -48,6 +54,12 @@ class BusinessControllerTest {
 
     @Mock
     private InvoiceRepository invoiceRepository;
+
+    @Mock
+    private PaymentRepository paymentRepository;
+
+    @Mock
+    private AppointmentRepository appointmentRepository;
 
     @InjectMocks
     private BusinessController businessController;
@@ -149,6 +161,57 @@ class BusinessControllerTest {
         assertEquals(1, response.getBody().size());
         assertEquals(301L, response.getBody().get(0).id());
         assertTrue(response.getBody().get(0).distanceKm() < 1);
+    }
+
+    @Test
+    void returnsInvoiceRevenueTrendForDailyWeeklyAndMonthlyIntervals() {
+        TenantContext.setTenantId(7L);
+        TenantContext.setUserId(15L);
+        BusinessUser user = new BusinessUser();
+        user.setBusinessId(101L);
+        Invoice invoice = new Invoice();
+        invoice.setBusinessId(101L);
+        invoice.setId(101L);
+        invoice.setIssueDate(LocalDate.now());
+        invoice.setCreatedAt(LocalDateTime.now());
+        invoice.setTotalAmount(new BigDecimal("125.00"));
+        invoice.setStatus(InvoiceStatus.SENT);
+        Invoice paidInvoice = new Invoice();
+        paidInvoice.setBusinessId(101L);
+        paidInvoice.setId(102L);
+        paidInvoice.setIssueDate(LocalDate.now());
+        paidInvoice.setCreatedAt(LocalDateTime.now().minusDays(1));
+        paidInvoice.setTotalAmount(new BigDecimal("75.00"));
+        paidInvoice.setStatus(InvoiceStatus.PAID);
+        Payment verifiedPayment = new Payment();
+        verifiedPayment.setBusinessId(101L);
+        verifiedPayment.setInvoiceId(101L);
+        verifiedPayment.setStatus(PaymentStatus.VERIFIED);
+        verifiedPayment.setAmount(new BigDecimal("50.00"));
+        when(businessUserRepository.findByUserIdAndTenantId(15L, 7L)).thenReturn(List.of(user));
+        when(invoiceRepository.findAll()).thenReturn(List.of(invoice, paidInvoice));
+        when(paymentRepository.findAll()).thenReturn(List.of(verifiedPayment));
+        when(appointmentRepository.findAll()).thenReturn(List.of());
+        when(businessCustomerRepository.findAll()).thenReturn(List.of());
+        when(customerProfileRepository.findAll()).thenReturn(List.of());
+
+        var daily = businessController.getBusinessDashboardSummary(101L, "DAILY");
+        var weekly = businessController.getBusinessDashboardSummary(101L, "WEEKLY");
+        var monthly = businessController.getBusinessDashboardSummary(101L, "MONTHLY");
+
+        assertEquals(7, ((List<?>) daily.get("revenueTrend")).size());
+        assertEquals(6, ((List<?>) weekly.get("revenueTrend")).size());
+        assertEquals(6, ((List<?>) monthly.get("revenueTrend")).size());
+        assertEquals(200.0, trendValueAt(daily, 6));
+        assertEquals(200.0, trendValueAt(weekly, 5));
+        assertEquals(200.0, trendValueAt(monthly, 5));
+        assertEquals(200.0, ((Number) monthly.get("billableRevenue")).doubleValue());
+        assertEquals(125.0, ((Number) monthly.get("completedRevenue")).doubleValue());
+    }
+
+    private double trendValueAt(java.util.Map<String, Object> summary, int index) {
+        List<?> trend = (List<?>) summary.get("revenueTrend");
+        return ((Number) ((java.util.Map<?, ?>) trend.get(index)).get("value")).doubleValue();
     }
 
     @Test

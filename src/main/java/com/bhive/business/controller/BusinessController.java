@@ -1,6 +1,7 @@
 package com.bhive.business.controller;
 
 import com.bhive.billing.entity.Invoice;
+import com.bhive.billing.entity.InvoiceStatus;
 import com.bhive.billing.repository.InvoiceRepository;
 import com.bhive.business.entity.Business;
 import com.bhive.business.entity.BusinessStatus;
@@ -20,11 +21,15 @@ import com.bhive.payment.repository.PaymentRepository;
 import com.bhive.appointment.entity.Appointment;
 import com.bhive.appointment.repository.AppointmentRepository;
 import java.math.BigDecimal;
+import java.time.DayOfWeek;
 import java.time.LocalDate;
+import java.time.YearMonth;
+import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -165,7 +170,12 @@ public class BusinessController {
     }
 
     @GetMapping("/dashboard-summary")
-    public Map<String, Object> getBusinessDashboardSummary(@RequestParam(required = false) Long businessId) {
+    public Map<String, Object> getBusinessDashboardSummary(@RequestParam(required = false) Long businessId,
+                                                           @RequestParam(defaultValue = "DAILY") String interval) {
+        String normalizedInterval = interval.toUpperCase(Locale.ROOT);
+        if (!List.of("DAILY", "WEEKLY", "MONTHLY").contains(normalizedInterval)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unsupported revenue interval.");
+        }
         Long tenantId = TenantContext.getTenantId();
         Long userId = TenantContext.getUserId();
 
@@ -226,6 +236,31 @@ public class BusinessController {
             .filter(Objects::nonNull)
             .reduce(BigDecimal.ZERO, BigDecimal::add);
 
+        List<Invoice> billableInvoices = invoices.stream()
+            .filter(invoice -> invoice.getStatus() != InvoiceStatus.DRAFT && invoice.getStatus() != InvoiceStatus.CANCELLED)
+            .toList();
+        BigDecimal billableRevenue = billableInvoices.stream()
+            .map(Invoice::getTotalAmount)
+            .filter(Objects::nonNull)
+            .map(amount -> amount.max(BigDecimal.ZERO))
+            .reduce(BigDecimal.ZERO, BigDecimal::add);
+        Map<Long, BigDecimal> verifiedPaymentsByInvoice = payments.stream()
+            .filter(payment -> payment.getStatus() != null && payment.getStatus().name().equalsIgnoreCase("VERIFIED"))
+            .filter(payment -> payment.getInvoiceId() != null && payment.getAmount() != null)
+            .collect(Collectors.toMap(Payment::getInvoiceId, Payment::getAmount, BigDecimal::add));
+        BigDecimal completedRevenue = billableInvoices.stream()
+            .map(invoice -> {
+                BigDecimal invoiceAmount = invoice.getTotalAmount() == null
+                    ? BigDecimal.ZERO
+                    : invoice.getTotalAmount().max(BigDecimal.ZERO);
+                if (invoice.getStatus() == InvoiceStatus.PAID) return invoiceAmount;
+                BigDecimal verifiedAmount = invoice.getId() == null
+                    ? BigDecimal.ZERO
+                    : verifiedPaymentsByInvoice.getOrDefault(invoice.getId(), BigDecimal.ZERO);
+                return verifiedAmount.max(BigDecimal.ZERO).min(invoiceAmount);
+            })
+            .reduce(BigDecimal.ZERO, BigDecimal::add);
+
         long newCustomers = activeCustomers.stream()
             .filter(customer -> customer.getCreatedAt() != null)
             .filter(customer -> customer.getCreatedAt().isAfter(LocalDate.now().minusDays(30).atStartOfDay()))
@@ -260,23 +295,12 @@ public class BusinessController {
             })
             .toList();
 
-        List<Map<String, Object>> revenueTrend = new ArrayList<>();
-        for (int index = 6; index >= 0; index--) {
-            LocalDate date = LocalDate.now().minusDays(index);
-            BigDecimal amount = invoices.stream()
-                .filter(invoice -> invoice.getIssueDate() != null && invoice.getIssueDate().equals(date))
-                .map(Invoice::getTotalAmount)
-                .filter(Objects::nonNull)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-
-            Map<String, Object> point = new LinkedHashMap<>();
-            point.put("label", date.getDayOfMonth() + "" );
-            point.put("value", amount.doubleValue());
-            revenueTrend.add(point);
-        }
+        List<Map<String, Object>> revenueTrend = buildRevenueTrend(invoices, normalizedInterval, LocalDate.now());
 
         Map<String, Object> summary = new LinkedHashMap<>();
         summary.put("totalRevenue", totalRevenue.doubleValue());
+        summary.put("billableRevenue", billableRevenue.doubleValue());
+        summary.put("completedRevenue", completedRevenue.doubleValue());
         summary.put("activeMembers", (long) activeCustomers.size());
         summary.put("pendingPayments", pendingPayments.doubleValue());
         summary.put("newCustomers", newCustomers);
@@ -288,9 +312,58 @@ public class BusinessController {
         return summary;
     }
 
+    private List<Map<String, Object>> buildRevenueTrend(List<Invoice> invoices, String interval, LocalDate today) {
+        List<Map<String, Object>> trend = new ArrayList<>();
+        if ("DAILY".equals(interval)) {
+            for (int offset = 6; offset >= 0; offset--) {
+                LocalDate date = today.minusDays(offset);
+                BigDecimal amount = invoiceAmountBetween(invoices, date, date.plusDays(1));
+                trend.add(revenueTrendPoint(String.valueOf(date.getDayOfMonth()), amount));
+            }
+            return trend;
+        }
+
+        if ("WEEKLY".equals(interval)) {
+            LocalDate currentWeekStart = today.minusDays(today.getDayOfWeek().getValue() - DayOfWeek.MONDAY.getValue());
+            DateTimeFormatter labelFormat = DateTimeFormatter.ofPattern("d MMM", Locale.ENGLISH);
+            for (int offset = 5; offset >= 0; offset--) {
+                LocalDate start = currentWeekStart.minusWeeks(offset);
+                trend.add(revenueTrendPoint(start.format(labelFormat), invoiceAmountBetween(invoices, start, start.plusWeeks(1))));
+            }
+            return trend;
+        }
+
+        YearMonth currentMonth = YearMonth.from(today);
+        for (int offset = 5; offset >= 0; offset--) {
+            YearMonth month = currentMonth.minusMonths(offset);
+            BigDecimal amount = invoiceAmountBetween(invoices, month.atDay(1), month.plusMonths(1).atDay(1));
+            trend.add(revenueTrendPoint(month.toString(), amount));
+        }
+        return trend;
+    }
+
+    private BigDecimal invoiceAmountBetween(List<Invoice> invoices, LocalDate start, LocalDate end) {
+        return invoices.stream()
+            .filter(invoice -> invoice.getIssueDate() != null
+                && !invoice.getIssueDate().isBefore(start)
+                && invoice.getIssueDate().isBefore(end))
+            .map(Invoice::getTotalAmount)
+            .filter(Objects::nonNull)
+            .reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
+
+    private Map<String, Object> revenueTrendPoint(String label, BigDecimal amount) {
+        Map<String, Object> point = new LinkedHashMap<>();
+        point.put("label", label);
+        point.put("value", amount.doubleValue());
+        return point;
+    }
+
     private Map<String, Object> emptySummary() {
         Map<String, Object> empty = new LinkedHashMap<>();
         empty.put("totalRevenue", 0d);
+        empty.put("billableRevenue", 0d);
+        empty.put("completedRevenue", 0d);
         empty.put("activeMembers", 0L);
         empty.put("pendingPayments", 0d);
         empty.put("newCustomers", 0L);

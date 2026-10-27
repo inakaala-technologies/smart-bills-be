@@ -83,7 +83,6 @@ public class BusinessInsightsController {
         List<BusinessCustomer> customers = businessCustomerRepository.findByTenantIdAndBusinessId(tenantId, businessId);
         LocalDate today = LocalDate.now();
         YearMonth currentMonth = YearMonth.from(today);
-
         List<TrendPoint> revenueTrend = new ArrayList<>();
         List<TrendPoint> acquisitionTrend = new ArrayList<>();
         for (int offset = months - 1; offset >= 0; offset--) {
