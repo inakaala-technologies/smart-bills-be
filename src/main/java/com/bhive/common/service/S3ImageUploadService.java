@@ -32,9 +32,6 @@ public class S3ImageUploadService {
 	@Value("${spring.profiles.active}")
 	private String profile;
 
-	@Value("${bhive.s3.bucket-name}")
-	private String bucketName;
-
 	@Value("${bhive.s3.prefix:}")
 	private String keyPrefix;
 
