@@ -7,6 +7,8 @@ public record NearbyBusinessSummary(
     String address,
     Double latitude,
     Double longitude,
-    Double distanceKm
+    Double distanceKm,
+    boolean appointmentsEnabled,
+    boolean homeServicesEnabled
 ) {
 }

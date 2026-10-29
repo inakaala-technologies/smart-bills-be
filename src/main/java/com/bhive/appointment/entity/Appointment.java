@@ -31,6 +31,15 @@ public class Appointment {
     @Column(name = "service_price", precision = 12, scale = 2)
     private BigDecimal servicePrice;
 
+    @Column(name = "home_visit", nullable = false)
+    private boolean homeVisit;
+
+    @Column(name = "visiting_charge", nullable = false, precision = 12, scale = 2)
+    private BigDecimal visitingCharge = BigDecimal.ZERO;
+
+    @Column(name = "visit_address", length = 500)
+    private String visitAddress;
+
     @Column(name = "loyalty_points_redeemed", nullable = false)
     private Integer loyaltyPointsRedeemed = 0;
 
@@ -134,6 +143,13 @@ public class Appointment {
     public void setServicePrice(BigDecimal servicePrice) {
         this.servicePrice = servicePrice;
     }
+
+    public boolean isHomeVisit() { return homeVisit; }
+    public void setHomeVisit(boolean homeVisit) { this.homeVisit = homeVisit; }
+    public BigDecimal getVisitingCharge() { return visitingCharge; }
+    public void setVisitingCharge(BigDecimal visitingCharge) { this.visitingCharge = visitingCharge == null ? BigDecimal.ZERO : visitingCharge; }
+    public String getVisitAddress() { return visitAddress; }
+    public void setVisitAddress(String visitAddress) { this.visitAddress = visitAddress; }
 
     public Integer getLoyaltyPointsRedeemed() { return loyaltyPointsRedeemed; }
     public void setLoyaltyPointsRedeemed(Integer loyaltyPointsRedeemed) { this.loyaltyPointsRedeemed = loyaltyPointsRedeemed; }

@@ -14,6 +14,7 @@ import com.bhive.loyalty.dto.LoyaltyRedemptionResponse;
 import com.bhive.loyalty.entity.LoyaltyEntryType;
 import com.bhive.loyalty.entity.LoyaltyLedgerEntry;
 import com.bhive.loyalty.entity.LoyaltyProgramSettings;
+import com.bhive.loyalty.entity.InvoiceEarningMode;
 import com.bhive.loyalty.repository.LoyaltyLedgerRepository;
 import com.bhive.loyalty.repository.LoyaltyProgramSettingsRepository;
 import com.bhive.loyalty.repository.LoyaltyRuleRepository;
@@ -89,6 +90,47 @@ class LoyaltyServiceTest {
 
         assertThrows(ResponseStatusException.class, () -> loyaltyService.redeemForPurchase(
             1L, 2L, 3L, 11, new BigDecimal("100.00"), "BOOKING:5", "APPOINTMENT", 5L, "test"));
+    }
+
+    @Test
+    void automaticallyRedeemsAvailablePointsUpToThePurchaseCap() {
+        when(customerRepository.findForUpdate(1L, 2L, 3L)).thenReturn(Optional.of(new BusinessCustomer()));
+        when(ledgerRepository.findByBusinessIdAndCustomerIdAndIdempotencyKey(2L, 3L, "INVOICE:11"))
+            .thenReturn(Optional.empty());
+        when(settingsRepository.findByTenantIdAndBusinessId(1L, 2L)).thenReturn(Optional.of(settings(100, "25.00")));
+        when(ledgerRepository.getBalance(1L, 2L, 3L)).thenReturn(500L);
+        when(ledgerRepository.save(any(LoyaltyLedgerEntry.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        LoyaltyRedemptionResponse result = loyaltyService.redeemMaximumForPurchase(1L, 2L, 3L,
+            new BigDecimal("100.00"), "INVOICE:11", "INVOICE", 11L, "test");
+
+        assertEquals(500, result.pointsRedeemed());
+        assertEquals(new BigDecimal("5.00"), result.discountAmount());
+        assertEquals(0L, result.balanceAfter());
+    }
+
+    @Test
+    void awardsConfiguredPercentagePointsFromFinalInvoiceAmount() {
+        LoyaltyProgramSettings settings = settings(100, "25.00");
+        settings.setInvoiceEarningMode(InvoiceEarningMode.PERCENTAGE);
+        settings.setInvoiceEarningValue(new BigDecimal("2.50"));
+        when(settingsRepository.findByTenantIdAndBusinessId(1L, 2L)).thenReturn(Optional.of(settings));
+        BusinessCustomer businessCustomer = new BusinessCustomer();
+        businessCustomer.setTenantId(1L);
+        when(customerRepository.findByBusinessIdAndCustomerProfileId(2L, 3L))
+            .thenReturn(Optional.of(businessCustomer));
+        when(ledgerRepository.findByBusinessIdAndCustomerIdAndIdempotencyKey(2L, 3L, "INVOICE-EARN:12"))
+            .thenReturn(Optional.empty());
+        when(ledgerRepository.getBalance(1L, 2L, 3L)).thenReturn(0L);
+        when(ledgerRepository.save(any(LoyaltyLedgerEntry.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        loyaltyService.awardInvoiceIfConfigured(1L, 2L, 3L, 12L, new BigDecimal("199.00"));
+
+        ArgumentCaptor<LoyaltyLedgerEntry> entry = ArgumentCaptor.forClass(LoyaltyLedgerEntry.class);
+        verify(ledgerRepository).save(entry.capture());
+        assertEquals(LoyaltyEntryType.EARN, entry.getValue().getEntryType());
+        assertEquals(4, entry.getValue().getPoints());
+        assertEquals("INVOICE-EARN:12", entry.getValue().getIdempotencyKey());
     }
 
     private LoyaltyProgramSettings settings(int pointsPerCurrencyUnit, String maxRedemptionPercent) {

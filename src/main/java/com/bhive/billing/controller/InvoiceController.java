@@ -1,6 +1,7 @@
 package com.bhive.billing.controller;
 
 import com.bhive.billing.entity.Invoice;
+import com.bhive.billing.entity.InvoiceDiscountType;
 import com.bhive.billing.entity.InvoiceStatus;
 import com.bhive.billing.dto.InvoiceCreateRequest;
 import com.bhive.billing.dto.InvoiceResponse;
@@ -130,7 +131,26 @@ public class InvoiceController {
         if (tenantId == null || userId == null || !businessMembershipService.userHasAccessToBusiness(userId, request.businessId(), tenantId)) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
         }
-        if (request.totalAmount().compareTo(request.subtotal().add(request.gstAmount())) != 0) {
+        BigDecimal grossAmount = request.subtotal().add(request.gstAmount());
+        BigDecimal invoiceDiscountAmount = request.invoiceDiscountAmount() == null
+            ? BigDecimal.ZERO
+            : request.invoiceDiscountAmount();
+        BigDecimal invoiceDiscountValue = request.invoiceDiscountValue() == null
+            ? BigDecimal.ZERO
+            : request.invoiceDiscountValue();
+        BigDecimal expectedDiscountAmount = BigDecimal.ZERO;
+        if (request.invoiceDiscountType() != null) {
+            expectedDiscountAmount = request.invoiceDiscountType() == InvoiceDiscountType.PERCENTAGE
+                ? grossAmount.multiply(invoiceDiscountValue).divide(BigDecimal.valueOf(100), 2, java.math.RoundingMode.HALF_UP)
+                : invoiceDiscountValue.setScale(2, java.math.RoundingMode.HALF_UP);
+        }
+        if (invoiceDiscountAmount.signum() < 0
+            || invoiceDiscountAmount.compareTo(grossAmount) > 0
+            || (request.invoiceDiscountType() == null && (invoiceDiscountAmount.signum() > 0 || invoiceDiscountValue.signum() > 0))
+            || (request.invoiceDiscountType() != null && request.invoiceDiscountType() == InvoiceDiscountType.PERCENTAGE
+                && invoiceDiscountValue.compareTo(BigDecimal.valueOf(100)) > 0)
+            || (request.invoiceDiscountType() != null && expectedDiscountAmount.compareTo(invoiceDiscountAmount) != 0)
+            || request.totalAmount().compareTo(grossAmount.subtract(invoiceDiscountAmount)) != 0) {
             return ResponseEntity.badRequest().build();
         }
         if ((request.status() != InvoiceStatus.DRAFT && request.status() != InvoiceStatus.SENT && request.status() != InvoiceStatus.PAID)
@@ -161,18 +181,15 @@ public class InvoiceController {
         invoice.setDueDate(request.dueDate());
         invoice.setSubtotal(request.subtotal());
         invoice.setGstAmount(request.gstAmount());
+        invoice.setInvoiceDiscountAmount(invoiceDiscountAmount);
+        invoice.setInvoiceDiscountType(request.invoiceDiscountType());
+        invoice.setInvoiceDiscountValue(invoiceDiscountValue);
         invoice.setTotalAmount(request.totalAmount());
         invoice.setStatus(request.status());
         Invoice saved = invoiceRepository.save(invoice);
-        int pointsToRedeem = request.loyaltyPointsToRedeem() == null ? 0 : request.loyaltyPointsToRedeem();
-        if (pointsToRedeem > 0) {
-            var redemption = loyaltyService.redeemForPurchase(tenantId, saved.getBusinessId(), saved.getCustomerId(),
-                pointsToRedeem, saved.getTotalAmount(), "INVOICE:" + saved.getId(),
-                "INVOICE", saved.getId(), "Points applied to invoice " + saved.getInvoiceNumber());
-            saved.setLoyaltyPointsRedeemed(redemption.pointsRedeemed());
-            saved.setLoyaltyDiscountAmount(redemption.discountAmount());
-            saved.setTotalAmount(saved.getTotalAmount().subtract(redemption.discountAmount()));
-            saved = invoiceRepository.save(saved);
+        if (saved.getStatus() == InvoiceStatus.PAID) {
+            loyaltyService.awardInvoiceIfConfigured(tenantId, saved.getBusinessId(), saved.getCustomerId(),
+                saved.getId(), saved.getTotalAmount());
         }
         Invoice responseInvoice = saved;
         if (responseInvoice.getStatus() == InvoiceStatus.SENT) {
@@ -231,13 +248,18 @@ public class InvoiceController {
 
 		invoice.setStatus(requestedStatus);
 		Invoice saved = invoiceRepository.save(invoice);
+		if (recordingPayment) {
+			loyaltyService.awardInvoiceIfConfigured(tenantId, saved.getBusinessId(), saved.getCustomerId(),
+					saved.getId(), saved.getTotalAmount());
+		}
 		if (sendingDraft) {
-			customerProfileRepository.findById(saved.getCustomerId())
+			Invoice notificationInvoice = saved;
+			customerProfileRepository.findById(notificationInvoice.getCustomerId())
 					.filter(customer -> tenantId.equals(customer.getTenantId())).map(CustomerProfile::getUserId)
 					.filter(recipientUserId -> recipientUserId != null && !recipientUserId.equals(userId))
 					.ifPresent(recipientUserId -> notificationService.create(tenantId, recipientUserId,
 							"INVOICE_CREATED", "New invoice",
-							"Invoice " + saved.getInvoiceNumber() + " is ready to review.", "/dashboard"));
+							"Invoice " + notificationInvoice.getInvoiceNumber() + " is ready to review.", "/dashboard"));
 		}
 
 		return ResponseEntity.ok(InvoiceResponse.from(saved));

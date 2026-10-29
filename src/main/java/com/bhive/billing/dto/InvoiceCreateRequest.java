@@ -4,6 +4,7 @@ import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
+import com.bhive.billing.entity.InvoiceDiscountType;
 import com.bhive.billing.entity.InvoiceStatus;
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -16,6 +17,8 @@ public record InvoiceCreateRequest(
     @NotNull @DecimalMin("0.00") @Digits(integer = 8, fraction = 2) BigDecimal subtotal,
     @NotNull @DecimalMin("0.00") @Digits(integer = 8, fraction = 2) BigDecimal gstAmount,
     @NotNull @DecimalMin("0.00") @Digits(integer = 8, fraction = 2) BigDecimal totalAmount,
-    @jakarta.validation.constraints.PositiveOrZero Integer loyaltyPointsToRedeem
+    @DecimalMin("0.00") @Digits(integer = 8, fraction = 2) BigDecimal invoiceDiscountAmount,
+    InvoiceDiscountType invoiceDiscountType,
+    @DecimalMin("0.00")     @Digits(integer = 8, fraction = 2) BigDecimal invoiceDiscountValue
 ) {
 }

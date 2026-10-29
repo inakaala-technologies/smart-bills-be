@@ -72,6 +72,50 @@ public class AppointmentConfigurationController {
             .orElse(ResponseEntity.status(HttpStatus.FORBIDDEN).build());
     }
 
+    @PutMapping("/businesses/{businessId}/home-services-enabled")
+    public ResponseEntity<?> setHomeServicesEnabled(@PathVariable Long businessId, @RequestParam boolean enabled) {
+        Long tenantId = TenantContext.getTenantId();
+        Long userId = TenantContext.getUserId();
+        if (tenantId == null || userId == null) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
+
+        return businessRepository.findById(businessId)
+            .filter(business -> tenantId.equals(business.getTenantId()))
+            .filter(business -> businessMembershipService.userHasAccessToBusiness(userId, businessId, tenantId))
+            .map(business -> {
+                if (enabled && !business.isAppointmentsEnabled()) {
+                    return ResponseEntity.badRequest().body(Map.of(
+                        "message", "Enable appointments before offering home services."
+                    ));
+                }
+                business.setHomeServicesEnabled(enabled);
+                return ResponseEntity.ok(businessRepository.save(business));
+            })
+            .orElse(ResponseEntity.status(HttpStatus.FORBIDDEN).build());
+    }
+
+    @PutMapping("/businesses/{businessId}/home-visit-charge")
+    public ResponseEntity<?> setHomeVisitCharge(@PathVariable Long businessId, @RequestParam java.math.BigDecimal charge) {
+        Long tenantId = TenantContext.getTenantId();
+        Long userId = TenantContext.getUserId();
+        if (tenantId == null || userId == null) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
+        if (charge == null || charge.signum() < 0 || charge.compareTo(new java.math.BigDecimal("1000000")) > 0) {
+            return ResponseEntity.badRequest().body(Map.of("message", "Enter a visiting charge between 0 and 1,000,000."));
+        }
+
+        return businessRepository.findById(businessId)
+            .filter(business -> tenantId.equals(business.getTenantId()))
+            .filter(business -> businessMembershipService.userHasAccessToBusiness(userId, businessId, tenantId))
+            .map(business -> {
+                business.setHomeVisitCharge(charge.setScale(2, java.math.RoundingMode.HALF_UP));
+                return ResponseEntity.ok(businessRepository.save(business));
+            })
+            .orElse(ResponseEntity.status(HttpStatus.FORBIDDEN).build());
+    }
+
     @PutMapping("/businesses/{businessId}/memberships-enabled")
     public ResponseEntity<?> setMembershipsEnabled(@PathVariable Long businessId, @RequestParam boolean enabled) {
         Long tenantId = TenantContext.getTenantId();

@@ -1,0 +1,7 @@
+ALTER TABLE businesses
+    ADD COLUMN home_visit_charge DECIMAL(12, 2) NOT NULL DEFAULT 0;
+
+ALTER TABLE appointments
+    ADD COLUMN home_visit BOOLEAN NOT NULL DEFAULT FALSE,
+    ADD COLUMN visiting_charge DECIMAL(12, 2) NOT NULL DEFAULT 0,
+    ADD COLUMN visit_address VARCHAR(500) NULL;

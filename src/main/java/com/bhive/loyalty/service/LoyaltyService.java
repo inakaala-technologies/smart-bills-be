@@ -6,6 +6,7 @@ import com.bhive.loyalty.dto.LoyaltyTransactionRequest;
 import com.bhive.loyalty.dto.LoyaltyTargetTransactionRequest;
 import com.bhive.loyalty.dto.LoyaltyRedemptionResponse;
 import com.bhive.loyalty.entity.LoyaltyProgramSettings;
+import com.bhive.loyalty.entity.InvoiceEarningMode;
 import com.bhive.loyalty.entity.LoyaltyEntryType;
 import com.bhive.loyalty.entity.LoyaltyLedgerEntry;
 import com.bhive.loyalty.entity.LoyaltyRule;
@@ -179,6 +180,56 @@ public class LoyaltyService {
         entry.setNote(note);
         ledgerRepository.save(entry);
         return new LoyaltyRedemptionResponse(points, discount, balance - points);
+    }
+
+    @Transactional
+    public LoyaltyRedemptionResponse redeemMaximumForPurchase(Long tenantId, Long businessId, Long customerId,
+                                                              BigDecimal purchaseAmount, String idempotencyKey,
+                                                              String referenceType, Long referenceId, String note) {
+        if (customerId == null || purchaseAmount == null || purchaseAmount.signum() <= 0) {
+            return new LoyaltyRedemptionResponse(0, BigDecimal.ZERO, 0);
+        }
+        Optional<LoyaltyProgramSettings> settingsResult = settingsRepository.findByTenantIdAndBusinessId(tenantId, businessId);
+        if (settingsResult.isEmpty() || settingsResult.get().getPointsPerCurrencyUnit() == null
+            || settingsResult.get().getMaxRedemptionPercent() == null) {
+            return new LoyaltyRedemptionResponse(0, BigDecimal.ZERO,
+                ledgerRepository.getBalance(tenantId, businessId, customerId));
+        }
+        customerRepository.findForUpdate(tenantId, businessId, customerId)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "Customer is not linked to this business."));
+        long balance = ledgerRepository.getBalance(tenantId, businessId, customerId);
+        LoyaltyProgramSettings settings = settingsResult.get();
+        BigDecimal maximumDiscount = purchaseAmount.multiply(settings.getMaxRedemptionPercent())
+            .divide(BigDecimal.valueOf(100), 2, RoundingMode.DOWN);
+        long pointsAllowedByCap = maximumDiscount.multiply(BigDecimal.valueOf(settings.getPointsPerCurrencyUnit()))
+            .setScale(0, RoundingMode.DOWN).longValue();
+        int points = (int) Math.min(Math.min(balance, pointsAllowedByCap), Integer.MAX_VALUE);
+        if (points <= 0) {
+            return new LoyaltyRedemptionResponse(0, BigDecimal.ZERO, balance);
+        }
+        return redeemForPurchase(tenantId, businessId, customerId, points, purchaseAmount, idempotencyKey,
+            referenceType, referenceId, note);
+    }
+
+    @Transactional
+    public void awardInvoiceIfConfigured(Long tenantId, Long businessId, Long customerId,
+                                         Long invoiceId, BigDecimal finalAmount) {
+        if (customerId == null || invoiceId == null || finalAmount == null || finalAmount.signum() <= 0) return;
+        Optional<LoyaltyProgramSettings> settingsResult = settingsRepository.findByTenantIdAndBusinessId(tenantId, businessId);
+        if (settingsResult.isEmpty()) return;
+        LoyaltyProgramSettings settings = settingsResult.get();
+        if (settings.getInvoiceEarningMode() == null || settings.getInvoiceEarningValue() == null) return;
+        BigDecimal pointsValue = settings.getInvoiceEarningMode() == InvoiceEarningMode.FIXED_POINTS
+            ? settings.getInvoiceEarningValue()
+            : finalAmount.multiply(settings.getInvoiceEarningValue()).divide(BigDecimal.valueOf(100), 0, RoundingMode.DOWN);
+        BigDecimal wholePoints = pointsValue.setScale(0, RoundingMode.DOWN);
+        int points = wholePoints.compareTo(BigDecimal.valueOf(Integer.MAX_VALUE)) > 0
+            ? Integer.MAX_VALUE
+            : wholePoints.intValue();
+        if (points <= 0) return;
+        record(tenantId, businessId, LoyaltyEntryType.EARN,
+            new LoyaltyTransactionRequest(customerId, points, "INVOICE-EARN:" + invoiceId,
+                "INVOICE", invoiceId, "Points earned for paid invoice " + invoiceId));
     }
 
     private LoyaltyProgramSettings getConfiguredSettings(Long tenantId, Long businessId) {

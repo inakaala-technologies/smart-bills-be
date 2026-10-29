@@ -1,6 +1,7 @@
 package com.bhive.billing.dto;
 
 import com.bhive.billing.entity.Invoice;
+import com.bhive.billing.entity.InvoiceDiscountType;
 import com.bhive.billing.entity.InvoiceStatus;
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -16,6 +17,9 @@ public record InvoiceResponse(
     BigDecimal subtotal,
     BigDecimal gstAmount,
     BigDecimal totalAmount,
+    BigDecimal invoiceDiscountAmount,
+    InvoiceDiscountType invoiceDiscountType,
+    BigDecimal invoiceDiscountValue,
     Integer loyaltyPointsRedeemed,
     BigDecimal loyaltyDiscountAmount,
     InvoiceStatus status,
@@ -26,7 +30,8 @@ public record InvoiceResponse(
         return new InvoiceResponse(
             invoice.getId(), invoice.getBusinessId(), invoice.getCustomerId(), invoice.getInvoiceNumber(),
             invoice.getIssueDate(), invoice.getDueDate(), invoice.getSubtotal(), invoice.getGstAmount(),
-            invoice.getTotalAmount(), invoice.getLoyaltyPointsRedeemed(), invoice.getLoyaltyDiscountAmount(),
+            invoice.getTotalAmount(), invoice.getInvoiceDiscountAmount(), invoice.getInvoiceDiscountType(),
+            invoice.getInvoiceDiscountValue(), invoice.getLoyaltyPointsRedeemed(), invoice.getLoyaltyDiscountAmount(),
             invoice.getStatus(), invoice.getCreatedAt(), invoice.getUpdatedAt()
         );
     }

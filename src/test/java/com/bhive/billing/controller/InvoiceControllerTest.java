@@ -159,6 +159,61 @@ class InvoiceControllerTest {
 		org.junit.jupiter.api.Assertions.assertEquals("ACTIVE", savedLink.getStatus());
 		verify(notificationService).create(Mockito.eq(10L), Mockito.eq(30L), Mockito.eq("INVOICE_CREATED"),
 				Mockito.eq("New invoice"), Mockito.contains("is ready to review."), Mockito.eq("/dashboard"));
+		verify(loyaltyService, Mockito.never()).redeemMaximumForPurchase(Mockito.anyLong(), Mockito.anyLong(),
+				Mockito.anyLong(), Mockito.any(), Mockito.anyString(), Mockito.anyString(), Mockito.any(),
+				Mockito.anyString());
+		verify(loyaltyService, Mockito.never()).awardInvoiceIfConfigured(Mockito.anyLong(), Mockito.anyLong(),
+				Mockito.anyLong(), Mockito.any(), Mockito.any());
+	}
+
+	@Test
+	void createInvoiceShouldPersistDiscountAppliedToGrossAmount() throws Exception {
+		TenantContext.setTenantId(10L);
+		TenantContext.setUserId(20L);
+		Mockito.when(businessMembershipService.userHasAccessToBusiness(20L, 1L, 10L)).thenReturn(true);
+		Mockito.when(businessCustomerRepository.findByBusinessIdAndCustomerProfileId(1L, 2L))
+				.thenReturn(Optional.of(new BusinessCustomer()));
+		Mockito.when(invoiceRepository.save(Mockito.any(Invoice.class)))
+				.thenAnswer(invocation -> invocation.getArgument(0));
+		CustomerProfile customer = new CustomerProfile();
+		customer.setId(2L);
+		customer.setTenantId(10L);
+		Mockito.when(customerProfileRepository.findById(2L)).thenReturn(Optional.of(customer));
+
+		mockMvc.perform(post("/api/v1/billing/invoices")
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"businessId\":1,\"customerId\":2,\"status\":\"PAID\",\"subtotal\":100.00,\"gstAmount\":18.00,\"invoiceDiscountAmount\":11.80,\"invoiceDiscountType\":\"PERCENTAGE\",\"invoiceDiscountValue\":10.00,\"totalAmount\":106.20}"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.invoiceDiscountAmount").value(11.8))
+			.andExpect(jsonPath("$.invoiceDiscountType").value("PERCENTAGE"))
+			.andExpect(jsonPath("$.invoiceDiscountValue").value(10.0))
+			.andExpect(jsonPath("$.totalAmount").value(106.2));
+
+		ArgumentCaptor<Invoice> invoiceCaptor = ArgumentCaptor.forClass(Invoice.class);
+		verify(invoiceRepository).save(invoiceCaptor.capture());
+		org.junit.jupiter.api.Assertions.assertEquals(new BigDecimal("11.80"), invoiceCaptor.getValue().getInvoiceDiscountAmount());
+		org.junit.jupiter.api.Assertions.assertEquals(com.bhive.billing.entity.InvoiceDiscountType.PERCENTAGE, invoiceCaptor.getValue().getInvoiceDiscountType());
+		org.junit.jupiter.api.Assertions.assertEquals(new BigDecimal("10.00"), invoiceCaptor.getValue().getInvoiceDiscountValue());
+		org.junit.jupiter.api.Assertions.assertEquals(new BigDecimal("106.20"), invoiceCaptor.getValue().getTotalAmount());
+		verify(loyaltyService, Mockito.never()).redeemMaximumForPurchase(Mockito.anyLong(), Mockito.anyLong(),
+				Mockito.anyLong(), Mockito.any(), Mockito.anyString(), Mockito.anyString(), Mockito.any(),
+				Mockito.anyString());
+		verify(loyaltyService).awardInvoiceIfConfigured(Mockito.eq(10L), Mockito.eq(1L), Mockito.eq(2L),
+				Mockito.any(), Mockito.eq(new BigDecimal("106.20")));
+	}
+
+	@Test
+	void createInvoiceShouldRejectDiscountAmountThatDoesNotMatchItsRate() throws Exception {
+		TenantContext.setTenantId(10L);
+		TenantContext.setUserId(20L);
+		Mockito.when(businessMembershipService.userHasAccessToBusiness(20L, 1L, 10L)).thenReturn(true);
+
+		mockMvc.perform(post("/api/v1/billing/invoices")
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"businessId\":1,\"customerId\":2,\"status\":\"PAID\",\"subtotal\":100.00,\"gstAmount\":18.00,\"invoiceDiscountAmount\":10.00,\"invoiceDiscountType\":\"PERCENTAGE\",\"invoiceDiscountValue\":10.00,\"totalAmount\":108.00}"))
+			.andExpect(status().isBadRequest());
+
+		Mockito.verify(invoiceRepository, Mockito.never()).save(Mockito.any(Invoice.class));
 	}
 
 	@Test
@@ -194,6 +249,14 @@ class InvoiceControllerTest {
 
 		verify(notificationService, Mockito.never()).create(Mockito.anyLong(), Mockito.anyLong(), Mockito.anyString(),
 				Mockito.anyString(), Mockito.anyString(), Mockito.anyString());
+		verify(loyaltyService, Mockito.never()).redeemMaximumForPurchase(Mockito.anyLong(), Mockito.anyLong(),
+				Mockito.anyLong(), Mockito.any(), Mockito.anyString(), Mockito.anyString(), Mockito.any(),
+				Mockito.anyString());
+		verify(loyaltyService, Mockito.never()).redeemMaximumForPurchase(Mockito.anyLong(), Mockito.anyLong(),
+				Mockito.anyLong(), Mockito.any(), Mockito.anyString(), Mockito.anyString(), Mockito.any(),
+				Mockito.anyString());
+		verify(loyaltyService, Mockito.never()).awardInvoiceIfConfigured(Mockito.anyLong(), Mockito.anyLong(),
+				Mockito.anyLong(), Mockito.any(), Mockito.any());
 	}
 
 	@Test

@@ -48,6 +48,12 @@ public class Business {
     @Column(name = "appointments_enabled", nullable = false)
     private boolean appointmentsEnabled;
 
+    @Column(name = "home_services_enabled", nullable = false)
+    private boolean homeServicesEnabled;
+
+    @Column(name = "home_visit_charge", nullable = false, precision = 12, scale = 2)
+    private java.math.BigDecimal homeVisitCharge = java.math.BigDecimal.ZERO;
+
     @Column(name = "memberships_enabled", nullable = false)
     private boolean membershipsEnabled = true;
 
@@ -177,6 +183,22 @@ public class Business {
 
     public void setAppointmentsEnabled(boolean appointmentsEnabled) {
         this.appointmentsEnabled = appointmentsEnabled;
+    }
+
+    public java.math.BigDecimal getHomeVisitCharge() {
+        return homeVisitCharge == null ? java.math.BigDecimal.ZERO : homeVisitCharge;
+    }
+
+    public void setHomeVisitCharge(java.math.BigDecimal homeVisitCharge) {
+        this.homeVisitCharge = homeVisitCharge == null ? java.math.BigDecimal.ZERO : homeVisitCharge;
+    }
+
+    public boolean isHomeServicesEnabled() {
+        return homeServicesEnabled;
+    }
+
+    public void setHomeServicesEnabled(boolean homeServicesEnabled) {
+        this.homeServicesEnabled = homeServicesEnabled;
     }
 
     public boolean isMembershipsEnabled() {

@@ -40,6 +40,16 @@ public class Invoice {
     @Column(name = "total_amount", nullable = false, precision = 10, scale = 2)
     private BigDecimal totalAmount;
 
+    @Column(name = "invoice_discount_amount", nullable = false, precision = 12, scale = 2, columnDefinition = "DECIMAL(12,2) NOT NULL DEFAULT 0.00")
+    private BigDecimal invoiceDiscountAmount = BigDecimal.ZERO;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "invoice_discount_type", length = 16)
+    private InvoiceDiscountType invoiceDiscountType;
+
+    @Column(name = "invoice_discount_value", nullable = false, precision = 10, scale = 2, columnDefinition = "DECIMAL(10,2) NOT NULL DEFAULT 0.00")
+    private BigDecimal invoiceDiscountValue = BigDecimal.ZERO;
+
     @Column(name = "loyalty_points_redeemed", nullable = false)
     private Integer loyaltyPointsRedeemed = 0;
 
@@ -145,6 +155,30 @@ public class Invoice {
 
     public void setTotalAmount(BigDecimal totalAmount) {
         this.totalAmount = totalAmount;
+    }
+
+    public BigDecimal getInvoiceDiscountAmount() {
+        return invoiceDiscountAmount;
+    }
+
+    public void setInvoiceDiscountAmount(BigDecimal invoiceDiscountAmount) {
+        this.invoiceDiscountAmount = invoiceDiscountAmount;
+    }
+
+    public InvoiceDiscountType getInvoiceDiscountType() {
+        return invoiceDiscountType;
+    }
+
+    public void setInvoiceDiscountType(InvoiceDiscountType invoiceDiscountType) {
+        this.invoiceDiscountType = invoiceDiscountType;
+    }
+
+    public BigDecimal getInvoiceDiscountValue() {
+        return invoiceDiscountValue;
+    }
+
+    public void setInvoiceDiscountValue(BigDecimal invoiceDiscountValue) {
+        this.invoiceDiscountValue = invoiceDiscountValue;
     }
 
     public Integer getLoyaltyPointsRedeemed() { return loyaltyPointsRedeemed; }

@@ -12,6 +12,7 @@ import com.bhive.loyalty.dto.LoyaltyTargetTransactionRequest;
 import com.bhive.loyalty.dto.LoyaltySettingsRequest;
 import com.bhive.loyalty.dto.LoyaltySettingsResponse;
 import com.bhive.loyalty.entity.LoyaltyEntryType;
+import com.bhive.loyalty.entity.InvoiceEarningMode;
 import com.bhive.loyalty.entity.LoyaltyLedgerEntry;
 import com.bhive.loyalty.entity.LoyaltyRule;
 import com.bhive.loyalty.repository.LoyaltyLedgerRepository;
@@ -66,7 +67,15 @@ public class LoyaltyController {
         if (request == null || request.pointsPerCurrencyUnit() == null || request.pointsPerCurrencyUnit() <= 0
             || request.maxRedemptionPercent() == null || request.maxRedemptionPercent().signum() <= 0
             || request.maxRedemptionPercent().compareTo(java.math.BigDecimal.valueOf(100)) > 0
-            || request.maxRedemptionPercent().scale() > 2) {
+            || request.maxRedemptionPercent().scale() > 2
+            || (request.invoiceEarningMode() == null) != (request.invoiceEarningValue() == null)
+            || (request.invoiceEarningMode() != null && (request.invoiceEarningValue().signum() <= 0
+                || request.invoiceEarningValue().scale() > 2
+                || (request.invoiceEarningMode() == InvoiceEarningMode.PERCENTAGE
+                    && request.invoiceEarningValue().compareTo(java.math.BigDecimal.valueOf(100)) > 0)
+                || (request.invoiceEarningMode() == InvoiceEarningMode.FIXED_POINTS
+                    && (request.invoiceEarningValue().stripTrailingZeros().scale() > 0
+                        || request.invoiceEarningValue().compareTo(java.math.BigDecimal.valueOf(Integer.MAX_VALUE)) > 0))))) {
             return ResponseEntity.badRequest().build();
         }
         var settings = settingsRepository.findByTenantIdAndBusinessId(tenantId(), businessId)
@@ -75,6 +84,8 @@ public class LoyaltyController {
         settings.setBusinessId(businessId);
         settings.setPointsPerCurrencyUnit(request.pointsPerCurrencyUnit());
         settings.setMaxRedemptionPercent(request.maxRedemptionPercent());
+        settings.setInvoiceEarningMode(request.invoiceEarningMode());
+        settings.setInvoiceEarningValue(request.invoiceEarningValue());
         return ResponseEntity.ok(LoyaltySettingsResponse.from(settingsRepository.save(settings)));
     }
 

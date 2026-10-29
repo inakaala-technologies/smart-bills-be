@@ -250,6 +250,12 @@ public class AppointmentController {
         if (business.isEmpty() || !business.get().isAppointmentsEnabled()) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
         }
+        if (request.isHomeVisit()) {
+            String address = request.getVisitAddress() == null ? "" : request.getVisitAddress().trim();
+            if (!business.get().isHomeServicesEnabled() || address.isEmpty() || address.length() > 500) {
+                return ResponseEntity.badRequest().build();
+            }
+        }
 
         Optional<AppointmentService> selectedService = appointmentServiceRepository.findById(request.getAppointmentServiceId())
             .filter(service -> tenantId.equals(service.getTenantId()))
@@ -313,6 +319,9 @@ public class AppointmentController {
         appointment.setDurationMinutes(selectedService.get().getDurationMinutes());
         appointment.setStatus(AppointmentStatus.BOOKED);
         appointment.setNotes(request.getNotes() == null ? null : request.getNotes().trim());
+        appointment.setHomeVisit(request.isHomeVisit());
+        appointment.setVisitingCharge(request.isHomeVisit() ? business.get().getHomeVisitCharge() : BigDecimal.ZERO);
+        appointment.setVisitAddress(request.isHomeVisit() ? request.getVisitAddress().trim() : null);
         Appointment saved = appointmentRepository.save(appointment);
         int pointsToRedeem = request.getLoyaltyPointsToRedeem() == null ? 0 : request.getLoyaltyPointsToRedeem();
         if (pointsToRedeem > 0) {

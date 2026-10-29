@@ -40,7 +40,9 @@ public class AppointmentBillingService {
             return existingInvoice.get();
         }
 
-        BigDecimal subtotal = appointment.getServicePrice() == null ? BigDecimal.ZERO : appointment.getServicePrice();
+        BigDecimal servicePrice = appointment.getServicePrice() == null ? BigDecimal.ZERO : appointment.getServicePrice();
+        BigDecimal visitingCharge = appointment.getVisitingCharge() == null ? BigDecimal.ZERO : appointment.getVisitingCharge();
+        BigDecimal subtotal = servicePrice.add(visitingCharge);
         BigDecimal loyaltyDiscount = appointment.getLoyaltyDiscountAmount() == null
             ? BigDecimal.ZERO
             : appointment.getLoyaltyDiscountAmount();

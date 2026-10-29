@@ -97,8 +97,10 @@ public class BusinessController {
                 business.getAddress(),
                 business.getLatitude(),
                 business.getLongitude(),
-                GeoUtils.distanceKm(latitude, longitude, business.getLatitude(), business.getLongitude())
-            ))
+                GeoUtils.distanceKm(latitude, longitude, business.getLatitude(),                 business.getLongitude()),
+                                business.isAppointmentsEnabled(),
+                                business.isAppointmentsEnabled() && business.isHomeServicesEnabled()
+                            ))
             .filter(business -> business.distanceKm() <= radiusKm)
             .sorted(java.util.Comparator.comparingDouble(NearbyBusinessSummary::distanceKm))
             .limit(100)

@@ -21,6 +21,11 @@ public class LoyaltyProgramSettings {
     private Integer pointsPerCurrencyUnit;
     @Column(name = "max_redemption_percent", nullable = false, precision = 5, scale = 2)
     private BigDecimal maxRedemptionPercent;
+    @Enumerated(EnumType.STRING)
+    @Column(name = "invoice_earning_mode", length = 20)
+    private InvoiceEarningMode invoiceEarningMode;
+    @Column(name = "invoice_earning_value", precision = 10, scale = 2)
+    private BigDecimal invoiceEarningValue;
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
     @Column(name = "updated_at")
@@ -40,6 +45,10 @@ public class LoyaltyProgramSettings {
     public void setPointsPerCurrencyUnit(Integer pointsPerCurrencyUnit) { this.pointsPerCurrencyUnit = pointsPerCurrencyUnit; }
     public BigDecimal getMaxRedemptionPercent() { return maxRedemptionPercent; }
     public void setMaxRedemptionPercent(BigDecimal maxRedemptionPercent) { this.maxRedemptionPercent = maxRedemptionPercent; }
+    public InvoiceEarningMode getInvoiceEarningMode() { return invoiceEarningMode; }
+    public void setInvoiceEarningMode(InvoiceEarningMode invoiceEarningMode) { this.invoiceEarningMode = invoiceEarningMode; }
+    public BigDecimal getInvoiceEarningValue() { return invoiceEarningValue; }
+    public void setInvoiceEarningValue(BigDecimal invoiceEarningValue) { this.invoiceEarningValue = invoiceEarningValue; }
     public LocalDateTime getCreatedAt() { return createdAt; }
     public LocalDateTime getUpdatedAt() { return updatedAt; }
 }
