@@ -20,6 +20,7 @@ import com.bhive.common.util.TenantContext;
 import com.bhive.common.config.AccessTokenService;
 import com.bhive.common.util.GeoUtils;
 import com.bhive.common.util.ProfileIdGenerator;
+import com.bhive.common.service.S3ImageUploadService;
 import com.bhive.customer.entity.CustomerProfile;
 import com.bhive.customer.repository.BusinessCustomerRepository;
 import com.bhive.customer.repository.CustomerProfileRepository;
@@ -33,6 +34,7 @@ import java.time.Duration;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
@@ -43,7 +45,9 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 @RestController
 @RequestMapping("/api/v1/auth")
@@ -58,6 +62,7 @@ public class AuthController {
 	private final PasswordEncoder passwordEncoder;
 	private final AccessTokenService accessTokenService;
 	private final RefreshTokenService refreshTokenService;
+	private final S3ImageUploadService s3ImageUploadService;
 
 	@Value("${app.security.refresh-cookie.secure:false}")
 	private boolean refreshCookieSecure;
@@ -69,7 +74,7 @@ public class AuthController {
 			BusinessRepository businessRepository, BusinessUserRepository businessUserRepository,
 			CustomerProfileRepository customerProfileRepository, BusinessCustomerRepository businessCustomerRepository,
 			PasswordEncoder passwordEncoder, AccessTokenService accessTokenService,
-			RefreshTokenService refreshTokenService) {
+			RefreshTokenService refreshTokenService, S3ImageUploadService s3ImageUploadService) {
 		this.userRepository = userRepository;
 		this.userAccountRepository = userAccountRepository;
 		this.businessRepository = businessRepository;
@@ -79,6 +84,7 @@ public class AuthController {
 		this.passwordEncoder = passwordEncoder;
 		this.accessTokenService = accessTokenService;
 		this.refreshTokenService = refreshTokenService;
+		this.s3ImageUploadService = s3ImageUploadService;
 	}
 
 	@PostMapping("/register")
@@ -283,6 +289,33 @@ public class AuthController {
 
 		SessionContext session = resolveSessionContext(savedUser);
 		return ResponseEntity.ok(buildAuthResponse(savedUser, session, "Profile updated successfully."));
+	}
+
+	@PostMapping(value = "/me/profile-picture", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+	public ResponseEntity<AuthResponse> uploadCurrentUserProfilePicture(
+			@RequestParam("file") MultipartFile file) {
+		Long userId = TenantContext.getUserId();
+		if (userId == null) {
+			return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(new AuthResponse(null, null, null, null, null,
+					null, "User is not authenticated."));
+		}
+
+		Optional<User> userOpt = userRepository.findById(userId);
+		if (userOpt.isEmpty()) {
+			return ResponseEntity.status(HttpStatus.NOT_FOUND)
+					.body(new AuthResponse(null, null, null, null, null, null, "User profile not found."));
+		}
+
+		try {
+			User user = userOpt.get();
+			user.setProfilePictureUrl(s3ImageUploadService.uploadUserProfileImage(file, userId));
+			User savedUser = userRepository.save(user);
+			SessionContext session = resolveSessionContext(savedUser);
+			return ResponseEntity.ok(buildAuthResponse(savedUser, session, "Profile picture updated."));
+		} catch (IllegalArgumentException e) {
+			return ResponseEntity.badRequest()
+					.body(new AuthResponse(null, null, null, null, null, null, e.getMessage()));
+		}
 	}
 
 	@GetMapping("/profile")
@@ -676,6 +709,7 @@ public class AuthController {
 		AuthResponse response = new AuthResponse(user.getId(), user.getName(), user.getEmail(), activeRole, activeRole,
 				session.tenantId, session.businessId, message, accounts);
 		response.setPhone(phone);
+		response.setProfilePictureUrl(user.getProfilePictureUrl());
 		LinkedHashSet<Long> allowedTenants = new LinkedHashSet<>();
 		if (session.tenantId != null) {
 			allowedTenants.add(session.tenantId);

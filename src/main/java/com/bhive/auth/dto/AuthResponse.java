@@ -9,6 +9,7 @@ public class AuthResponse {
     private String name;
     private String email;
     private String phone;
+    private String profilePictureUrl;
     private UserRole role;
     private UserRole activeRole;
     private Long tenantId;
@@ -70,6 +71,14 @@ public class AuthResponse {
 
     public void setPhone(String phone) {
         this.phone = phone;
+    }
+
+    public String getProfilePictureUrl() {
+        return profilePictureUrl;
+    }
+
+    public void setProfilePictureUrl(String profilePictureUrl) {
+        this.profilePictureUrl = profilePictureUrl;
     }
 
     public UserRole getRole() {

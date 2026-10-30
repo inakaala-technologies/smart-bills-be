@@ -45,6 +45,10 @@ public class Business {
     @Transient
     private String city;
 
+    @Column(name = "banner_image_url", length = 2048)
+    @com.fasterxml.jackson.annotation.JsonProperty(access = com.fasterxml.jackson.annotation.JsonProperty.Access.READ_ONLY)
+    private String bannerImageUrl;
+
     @Column(name = "appointments_enabled", nullable = false)
     private boolean appointmentsEnabled;
 
@@ -176,6 +180,9 @@ public class Business {
     public void setRegion(String region) { this.region = region; }
     public String getCity() { return city; }
     public void setCity(String city) { this.city = city; }
+
+    public String getBannerImageUrl() { return bannerImageUrl; }
+    public void setBannerImageUrl(String bannerImageUrl) { this.bannerImageUrl = bannerImageUrl; }
 
     public boolean isAppointmentsEnabled() {
         return appointmentsEnabled;

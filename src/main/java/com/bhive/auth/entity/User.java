@@ -22,6 +22,9 @@ public class User {
 	@Size(max = 30)
 	private String phone;
 
+	@Column(name = "profile_picture_url", length = 2048)
+	private String profilePictureUrl;
+
 	@Column(name = "tenant_id")
 	private Long tenantId;
 
@@ -119,6 +122,14 @@ public class User {
 
 	public void setPhone(String phone) {
 		this.phone = phone;
+	}
+
+	public String getProfilePictureUrl() {
+		return profilePictureUrl;
+	}
+
+	public void setProfilePictureUrl(String profilePictureUrl) {
+		this.profilePictureUrl = profilePictureUrl;
 	}
 
 }

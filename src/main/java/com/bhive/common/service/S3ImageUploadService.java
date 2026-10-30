@@ -142,6 +142,83 @@ public class S3ImageUploadService {
 		}
 	}
 
+	public String uploadUserProfileImage(MultipartFile file, Long userId) {
+		return uploadValidatedImage(file, "profile-images/" + sanitizeId(userId.toString()) + "/profile-image",
+				"Profile");
+	}
+
+	public String uploadBusinessBannerImage(MultipartFile file, Long businessId) {
+		return uploadValidatedImage(file, "business-banners/" + sanitizeId(businessId.toString()) + "/banner",
+				"Banner");
+	}
+
+	private String uploadValidatedImage(MultipartFile file, String keyPath, String label) {
+		if (file == null || file.isEmpty()) {
+			throw new IllegalArgumentException("Select an image to upload.");
+		}
+		if (file.getSize() > 2L * 1024 * 1024) {
+			throw new IllegalArgumentException(label + " images must be 2 MB or smaller.");
+		}
+
+		String contentType = file.getContentType();
+		if (!StringUtils.hasText(contentType)) {
+			throw new IllegalArgumentException("The selected file must be an image.");
+		}
+		contentType = contentType.split(";", 2)[0].trim().toLowerCase(Locale.ROOT);
+		if (!isSupportedProfileImage(contentType)) {
+			throw new IllegalArgumentException("Only JPEG, PNG, GIF, and WebP images are allowed.");
+		}
+
+		try {
+			byte[] imageBytes = file.getBytes();
+			if (!matchesImageSignature(contentType, imageBytes)) {
+				throw new IllegalArgumentException("The selected file is not a valid image.");
+			}
+
+			String secretName = profile + "/bhive/s3";
+			JSONObject secretJson = secretsService.getSecretAsJson(secretName);
+			String region = secretJson.getString("s3Region");
+			String bucketName = secretJson.getString("s3BucketName");
+			String key = withPrefix(keyPath);
+
+			s3Client.putObject(
+					PutObjectRequest.builder().bucket(bucketName).key(key).contentType(contentType)
+							.cacheControl("no-cache, max-age=0, must-revalidate").build(),
+					RequestBody.fromBytes(imageBytes));
+
+			return "https://" + bucketName + ".s3." + region + ".amazonaws.com/" + key;
+		} catch (IllegalArgumentException e) {
+			throw e;
+		} catch (Exception e) {
+			log.error("Image upload failed. key={}", keyPath, e);
+			throw new RuntimeException(label + " image upload failed.", e);
+		}
+	}
+
+	private static boolean isSupportedProfileImage(String contentType) {
+		return switch (contentType) {
+		case "image/jpeg", "image/png", "image/gif", "image/webp" -> true;
+		default -> false;
+		};
+	}
+
+	private static boolean matchesImageSignature(String contentType, byte[] bytes) {
+		if (bytes.length < 8) {
+			return false;
+		}
+		return switch (contentType) {
+		case "image/jpeg" -> (bytes[0] & 0xFF) == 0xFF && (bytes[1] & 0xFF) == 0xD8
+				&& (bytes[2] & 0xFF) == 0xFF;
+		case "image/png" -> bytes[0] == (byte) 0x89 && bytes[1] == 0x50 && bytes[2] == 0x4E && bytes[3] == 0x47
+				&& bytes[4] == 0x0D && bytes[5] == 0x0A && bytes[6] == 0x1A && bytes[7] == 0x0A;
+		case "image/gif" -> bytes.length >= 6 && bytes[0] == 'G' && bytes[1] == 'I' && bytes[2] == 'F'
+				&& bytes[3] == '8' && (bytes[4] == '7' || bytes[4] == '9') && bytes[5] == 'a';
+		case "image/webp" -> bytes.length >= 12 && bytes[0] == 'R' && bytes[1] == 'I' && bytes[2] == 'F'
+				&& bytes[3] == 'F' && bytes[8] == 'W' && bytes[9] == 'E' && bytes[10] == 'B' && bytes[11] == 'P';
+		default -> false;
+		};
+	}
+
 	public void deleteFileByUrl(String url) {
 		try {
 			URI uri = URI.create(url);

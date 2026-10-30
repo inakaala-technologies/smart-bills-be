@@ -10,6 +10,10 @@ import com.bhive.business.entity.BusinessUser;
 import com.bhive.business.repository.BusinessRepository;
 import com.bhive.business.repository.BusinessUserRepository;
 import com.bhive.common.util.TenantContext;
+import com.bhive.business.service.BusinessMembershipService;
+import com.bhive.common.service.S3ImageUploadService;
+import org.springframework.http.MediaType;
+import org.springframework.web.multipart.MultipartFile;
 import com.bhive.common.util.GeoUtils;
 import com.bhive.common.util.ProfileIdGenerator;
 import com.bhive.customer.entity.BusinessCustomer;
@@ -51,6 +55,8 @@ public class BusinessController {
     private final InvoiceRepository invoiceRepository;
     private final PaymentRepository paymentRepository;
     private final AppointmentRepository appointmentRepository;
+    private final BusinessMembershipService businessMembershipService;
+    private final S3ImageUploadService s3ImageUploadService;
 
     public BusinessController(BusinessRepository businessRepository,
                              BusinessUserRepository businessUserRepository,
@@ -58,7 +64,11 @@ public class BusinessController {
                              BusinessCustomerRepository businessCustomerRepository,
                              InvoiceRepository invoiceRepository,
                              PaymentRepository paymentRepository,
-                             AppointmentRepository appointmentRepository) {
+                             AppointmentRepository appointmentRepository,
+                             BusinessMembershipService businessMembershipService,
+                             S3ImageUploadService s3ImageUploadService) {
+        this.businessMembershipService = businessMembershipService;
+        this.s3ImageUploadService = s3ImageUploadService;
         this.businessRepository = businessRepository;
         this.businessUserRepository = businessUserRepository;
         this.customerProfileRepository = customerProfileRepository;
@@ -402,6 +412,24 @@ public class BusinessController {
             .filter(business -> tenantId == null || tenantId.equals(business.getTenantId()))
             .map(ResponseEntity::ok)
             .orElse(ResponseEntity.notFound().build());
+    }
+
+    @PostMapping(value = "/{id}/banner", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<?> uploadBanner(@PathVariable Long id, @RequestParam("file") MultipartFile file) {
+        Long tenantId = TenantContext.getTenantId();
+        Long userId = TenantContext.getUserId();
+        if (!businessMembershipService.userHasAccessToBusiness(userId, id, tenantId)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "You cannot manage this business.");
+        }
+        Business business = businessRepository.findById(id)
+            .filter(b -> tenantId.equals(b.getTenantId()))
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Business not found."));
+        try {
+            business.setBannerImageUrl(s3ImageUploadService.uploadBusinessBannerImage(file, id));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
+        }
+        return ResponseEntity.ok(businessRepository.save(business));
     }
 
     @PostMapping

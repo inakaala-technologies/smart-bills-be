@@ -21,6 +21,7 @@ import com.bhive.auth.entity.UserRole;
 import com.bhive.auth.repository.UserAccountRepository;
 import com.bhive.auth.repository.UserRepository;
 import com.bhive.auth.service.RefreshTokenService;
+import com.bhive.common.service.S3ImageUploadService;
 import com.bhive.business.entity.Business;
 import com.bhive.business.entity.BusinessUser;
 import com.bhive.business.repository.BusinessRepository;
@@ -41,6 +42,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 @ExtendWith(MockitoExtension.class)
@@ -71,6 +73,9 @@ class AuthControllerTest {
     private AccessTokenService accessTokenService;
     @Mock
     private RefreshTokenService refreshTokenService;
+
+    @Mock
+    private S3ImageUploadService s3ImageUploadService;
 
     @InjectMocks
     private AuthController authController;
@@ -225,6 +230,62 @@ class AuthControllerTest {
             assertEquals("2222222222", profile.getPhone());
             assertEquals("Vijayawada, Andhra Pradesh, India", profile.getLocationAddress());
             assertEquals(16.5062, profile.getLatitude());
+        } finally {
+            TenantContext.clear();
+        }
+    }
+
+    @Test
+    void shouldUploadAndReturnProfilePictureForAuthenticatedUser() {
+        User user = new User();
+        user.setId(150L);
+        user.setName("Customer User");
+        user.setEmail("customer@bhive.com");
+        user.setRole(UserRole.CUSTOMER);
+        user.setTenantId(1L);
+        MockMultipartFile file = new MockMultipartFile(
+                "file", "profile.png", "image/png", new byte[] { 1, 2, 3 });
+        String imageUrl = "https://bucket.s3.region.amazonaws.com/profile-images/150/profile-image.png";
+
+        when(userRepository.findById(150L)).thenReturn(Optional.of(user));
+        when(s3ImageUploadService.uploadUserProfileImage(file, 150L)).thenReturn(imageUrl);
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(userAccountRepository.findByUserId(150L)).thenReturn(List.of());
+        when(customerProfileRepository.findAll()).thenReturn(List.of());
+
+        TenantContext.setUserId(150L);
+        TenantContext.setTenantId(1L);
+        try {
+            ResponseEntity<AuthResponse> response = authController.uploadCurrentUserProfilePicture(file);
+
+            assertEquals(HttpStatus.OK, response.getStatusCode());
+            assertEquals(imageUrl, response.getBody().getProfilePictureUrl());
+            assertEquals(imageUrl, user.getProfilePictureUrl());
+            verify(s3ImageUploadService).uploadUserProfileImage(file, 150L);
+        } finally {
+            TenantContext.clear();
+        }
+    }
+
+    @Test
+    void shouldReturnBadRequestWhenProfilePictureIsInvalid() {
+        MockMultipartFile file = new MockMultipartFile(
+                "file", "profile.txt", "text/plain", new byte[] { 1, 2, 3 });
+        User user = new User();
+        user.setId(150L);
+        when(userRepository.findById(150L)).thenReturn(Optional.of(user));
+        when(s3ImageUploadService.uploadUserProfileImage(file, 150L))
+                .thenThrow(new IllegalArgumentException("Only JPEG, PNG, GIF, and WebP images are allowed."));
+
+        TenantContext.setUserId(150L);
+        try {
+            ResponseEntity<AuthResponse> response = authController.uploadCurrentUserProfilePicture(file);
+
+            assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+            assertEquals(
+                    "Only JPEG, PNG, GIF, and WebP images are allowed.",
+                    response.getBody().getMessage());
+            verify(userRepository, never()).save(any(User.class));
         } finally {
             TenantContext.clear();
         }
