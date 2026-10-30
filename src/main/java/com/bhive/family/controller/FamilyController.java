@@ -74,8 +74,12 @@ public class FamilyController {
 
 			head = familyMemberRepository.saveAndFlush(head);
 
-			return ResponseEntity.status(HttpStatus.CREATED)
-					.body(new FamilyResponse(family, List.of(new FamilyMemberResponse(head))));
+			User user = userRepository.findById(userId)
+					.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found."));
+
+			FamilyMemberResponse memberResponse = new FamilyMemberResponse(head, user.getName(), user.getEmail());
+
+			return ResponseEntity.status(HttpStatus.CREATED).body(new FamilyResponse(family, List.of(memberResponse)));
 		} catch (DataIntegrityViolationException exception) {
 			throw new ResponseStatusException(HttpStatus.CONFLICT,
 					"You already belong to a family or have created one.");
@@ -147,11 +151,16 @@ public class FamilyController {
 	@GetMapping("/invitations")
 	@Transactional(readOnly = true)
 	public ResponseEntity<List<FamilyMemberResponse>> getInvitations() {
+
 		Long userId = requireCurrentUserId();
 
 		List<FamilyMemberResponse> invitations = familyMemberRepository
-				.findByUserIdAndStatusOrderByIdDesc(userId, FamilyMemberStatus.PENDING).stream()
-				.map(FamilyMemberResponse::new).toList();
+				.findByUserIdAndStatusOrderByIdDesc(userId, FamilyMemberStatus.PENDING).stream().map(member -> {
+					User inviter = userRepository.findById(member.getInvitedBy()).orElseThrow(
+							() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Family inviter not found."));
+
+					return new FamilyMemberResponse(member, inviter.getName(), inviter.getEmail());
+				}).toList();
 
 		return ResponseEntity.ok(invitations);
 	}
@@ -166,7 +175,6 @@ public class FamilyController {
 				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
 						"Pending family invitation not found."));
 
-		// The unique user_id constraint prevents another family membership.
 		invitation.setStatus(FamilyMemberStatus.ACCEPTED);
 		invitation.setJoinedAt(Instant.now());
 		familyMemberRepository.save(invitation);
@@ -215,9 +223,13 @@ public class FamilyController {
 		Family family = familyRepository.findById(membership.getFamilyId())
 				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Family not found."));
 
-		List<FamilyMemberResponse> members = familyMemberRepository
-				.findByFamilyIdAndStatusOrderByIdAsc(family.getId(), FamilyMemberStatus.ACCEPTED).stream()
-				.map(FamilyMemberResponse::new).toList();
+		List<FamilyMemberResponse> members = familyMemberRepository.findByFamilyIdOrderByIdAsc(family.getId()).stream()
+				.map(member -> {
+					User user = userRepository.findById(member.getUserId()).orElseThrow(
+							() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Family member user not found."));
+
+					return new FamilyMemberResponse(member, user.getName(), user.getEmail());
+				}).toList();
 
 		return ResponseEntity.ok(new FamilyResponse(family, members));
 	}

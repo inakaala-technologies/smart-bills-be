@@ -25,4 +25,6 @@ public interface FamilyMemberRepository extends JpaRepository<FamilyMember, Long
 	long countByFamilyIdAndStatus(Long familyId, FamilyMemberStatus status);
 
 	void deleteByFamilyIdAndUserId(Long familyId, Long userId);
+
+	List<FamilyMember> findByFamilyIdOrderByIdAsc(Long familyId);
 }

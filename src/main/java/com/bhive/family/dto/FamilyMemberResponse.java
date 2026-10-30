@@ -11,6 +11,8 @@ public class FamilyMemberResponse {
 	private Long id;
 	private Long familyId;
 	private Long userId;
+	private String name;
+	private String email;
 	private FamilyMemberStatus status;
 	private Long invitedBy;
 	private Instant joinedAt;
@@ -18,10 +20,12 @@ public class FamilyMemberResponse {
 	public FamilyMemberResponse() {
 	}
 
-	public FamilyMemberResponse(FamilyMember member) {
+	public FamilyMemberResponse(FamilyMember member, String name, String email) {
 		this.id = member.getId();
 		this.familyId = member.getFamilyId();
 		this.userId = member.getUserId();
+		this.name = name;
+		this.email = email;
 		this.status = member.getStatus();
 		this.invitedBy = member.getInvitedBy();
 		this.joinedAt = member.getJoinedAt();
@@ -50,4 +54,21 @@ public class FamilyMemberResponse {
 	public Instant getJoinedAt() {
 		return joinedAt;
 	}
+
+	public String getName() {
+		return name;
+	}
+
+	public void setName(String name) {
+		this.name = name;
+	}
+
+	public String getEmail() {
+		return email;
+	}
+
+	public void setEmail(String email) {
+		this.email = email;
+	}
+
 }
