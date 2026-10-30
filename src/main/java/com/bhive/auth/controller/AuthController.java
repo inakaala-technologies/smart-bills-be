@@ -118,6 +118,20 @@ public class AuthController {
 				request.getCountry().trim());
 
 		Optional<User> existing = userRepository.findByEmail(request.getEmail().trim().toLowerCase());
+
+		String phone = request.getPhone() == null || request.getPhone().isBlank() ? null : request.getPhone().trim();
+
+		if (phone != null) {
+			Optional<User> existingPhoneUser = userRepository.findByPhone(phone);
+
+			if (existingPhoneUser.isPresent()
+					&& (existing.isEmpty() || !existingPhoneUser.get().getId().equals(existing.get().getId()))) {
+
+				return ResponseEntity.status(HttpStatus.CONFLICT).body(new AuthResponse(null, null, null, null, null,
+						null, "This phone number is already registered with another account."));
+			}
+		}
+
 		if (existing.isPresent()) {
 			User existingUser = existing.get();
 			if (!passwordMatches(existingUser, request.getPassword())) {
@@ -220,6 +234,19 @@ public class AuthController {
 		}
 
 		User user = userOpt.get();
+
+		String phone = request.getPhone() == null || request.getPhone().isBlank() ? null : request.getPhone().trim();
+
+		if (phone != null) {
+			Optional<User> existingPhoneUser = userRepository.findByPhone(phone);
+
+			if (existingPhoneUser.isPresent() && !existingPhoneUser.get().getId().equals(userId)) {
+
+				return ResponseEntity.status(HttpStatus.CONFLICT).body(new AuthResponse(null, null, null, null, null,
+						null, "This phone number is already registered with another account."));
+			}
+		}
+
 		if (UserRole.CUSTOMER.equals(user.getRole()) && (request.getCountry() == null || request.getCountry().isBlank()
 				|| request.getCountry().length() > 80 || request.getRegion() == null || request.getRegion().isBlank()
 				|| request.getRegion().length() > 80 || request.getCity() == null || request.getCity().isBlank()
