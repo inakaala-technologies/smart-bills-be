@@ -115,7 +115,7 @@ public class BusinessOfferController {
 					Business business = businessesById.get(offer.getBusinessId());
 					return new NearbyOfferSummary(offer.getId(), business.getId(), business.getName(),
 							business.getAddress(), offer.getTitle(), offer.getDescription(), offer.getDiscountLabel(),
-							offer.getEndsAt(), offer.getAttachmentUrl(), offer.getAttachmentType(),
+							offer.getEndsAt(), offer.getAttachmentUrl(),
 							offer.getAttachmentName(),
 							GeoUtils.distanceKm(latitude, longitude, business.getLatitude(), business.getLongitude()));
 				}).filter(offer -> offer.distanceKm() <= radiusKm)
@@ -165,11 +165,6 @@ public class BusinessOfferController {
 						String.valueOf(saved.getId()));
 
 				saved.setAttachmentUrl(fileUrl);
-
-				String contentType = file.getContentType();
-
-				saved.setAttachmentType(
-						contentType != null && "application/pdf".equalsIgnoreCase(contentType) ? "pdf" : "image");
 
 				saved.setAttachmentName(file.getOriginalFilename());
 
