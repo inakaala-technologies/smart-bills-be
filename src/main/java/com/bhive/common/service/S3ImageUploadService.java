@@ -111,6 +111,49 @@ public class S3ImageUploadService {
 				"Banner");
 	}
 
+	public record StoredDocument(String url, String contentType) {}
+
+	public StoredDocument uploadPayslipDocument(MultipartFile file, Long businessId, Long employeeId) {
+		if (file == null || file.isEmpty()) {
+			throw new IllegalArgumentException("Select a payslip document to upload.");
+		}
+		if (file.getSize() > 5L * 1024 * 1024) {
+			throw new IllegalArgumentException("Payslip documents must be 5 MB or smaller.");
+		}
+		String contentType = file.getContentType();
+		if (!StringUtils.hasText(contentType)) {
+			throw new IllegalArgumentException("Only PDF, JPEG or PNG payslips are allowed.");
+		}
+		contentType = contentType.split(";", 2)[0].trim().toLowerCase(Locale.ROOT);
+		try {
+			byte[] bytes = file.getBytes();
+			boolean valid = switch (contentType) {
+			case "application/pdf" -> bytes.length >= 5 && bytes[0] == '%' && bytes[1] == 'P' && bytes[2] == 'D'
+					&& bytes[3] == 'F' && bytes[4] == '-';
+			case "image/jpeg", "image/png" -> matchesImageSignature(contentType, bytes);
+			default -> throw new IllegalArgumentException("Only PDF, JPEG or PNG payslips are allowed.");
+			};
+			if (!valid) {
+				throw new IllegalArgumentException("The selected file is not a valid payslip document.");
+			}
+			JSONObject secretJson = secretsService.getSecretAsJson(profile + "/bhive/s3");
+			String region = secretJson.getString("s3Region");
+			String bucketName = secretJson.getString("s3BucketName");
+			String key = withPrefix("payslips/" + sanitizeId(businessId.toString()) + "/"
+					+ sanitizeId(employeeId.toString()) + "/" + java.util.UUID.randomUUID()
+					+ extensionFromMime(contentType));
+			s3Client.putObject(PutObjectRequest.builder().bucket(bucketName).key(key).contentType(contentType)
+					.cacheControl("private, no-store").build(), RequestBody.fromBytes(bytes));
+			return new StoredDocument("https://" + bucketName + ".s3." + region + ".amazonaws.com/" + key,
+					contentType);
+		} catch (IllegalArgumentException e) {
+			throw e;
+		} catch (Exception e) {
+			log.error("Payslip upload failed. businessId={}", businessId, e);
+			throw new RuntimeException("Payslip upload failed.", e);
+		}
+	}
+
 	private String uploadValidatedImage(MultipartFile file, String keyPath, String label) {
 		if (file == null || file.isEmpty()) {
 			throw new IllegalArgumentException("Select an image to upload.");

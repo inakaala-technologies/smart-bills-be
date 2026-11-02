@@ -192,7 +192,8 @@ public class InvoiceController {
                 saved.getId(), saved.getTotalAmount());
         }
         Invoice responseInvoice = saved;
-        if (responseInvoice.getStatus() == InvoiceStatus.SENT) {
+        if (responseInvoice.getStatus() == InvoiceStatus.SENT || responseInvoice.getStatus() == InvoiceStatus.PAID) {
+            boolean paid = responseInvoice.getStatus() == InvoiceStatus.PAID;
             customer.map(CustomerProfile::getUserId)
                 .filter(recipientUserId -> recipientUserId != null && !recipientUserId.equals(userId))
                 .ifPresent(recipientUserId -> notificationService.create(
@@ -200,7 +201,9 @@ public class InvoiceController {
                     recipientUserId,
                     "INVOICE_CREATED",
                     "New invoice",
-                    "Invoice " + responseInvoice.getInvoiceNumber() + " is ready to review.",
+                    paid
+                        ? "Invoice " + responseInvoice.getInvoiceNumber() + " has been issued and marked as paid."
+                        : "Invoice " + responseInvoice.getInvoiceNumber() + " is ready to review.",
                     "/dashboard"
                 ));
         }

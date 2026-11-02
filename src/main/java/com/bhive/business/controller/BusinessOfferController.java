@@ -99,6 +99,7 @@ public class BusinessOfferController {
 
 		List<Business> nearbyBusinesses = businessRepository
 				.findByStatusAndLatitudeIsNotNullAndLongitudeIsNotNull(BusinessStatus.ACTIVE).stream()
+				.filter(Business::isProfileComplete)
 				.filter(business -> GeoUtils.distanceKm(latitude, longitude, business.getLatitude(),
 						business.getLongitude()) <= radiusKm)
 				.toList();

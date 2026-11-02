@@ -34,6 +34,12 @@ public interface CustomerProfileRepository extends JpaRepository<CustomerProfile
 
 	boolean existsByProfileId(String profileId);
 
+	Optional<CustomerProfile> findFirstByProfileIdIgnoreCaseAndTenantIdAndUserIdIsNotNull(String profileId, Long tenantId);
+
+	Optional<CustomerProfile> findFirstByEmailIgnoreCaseAndTenantIdAndUserIdIsNotNull(String email, Long tenantId);
+
+	Optional<CustomerProfile> findFirstByPhoneAndTenantIdAndUserIdIsNotNull(String phone, Long tenantId);
+
 	Optional<CustomerProfile> findFirstByEmailIgnoreCaseAndTenantIdAndUserIdIsNull(String email, Long tenantId);
 
 	Optional<CustomerProfile> findFirstByPhoneAndTenantIdAndUserIdIsNull(String phone, Long tenantId);

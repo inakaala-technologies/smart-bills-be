@@ -590,7 +590,8 @@ public class AuthController {
 
 		Business business = new Business();
 		business.setTenantId(resolvedTenantId);
-		business.setName(user.getName() == null || user.getName().isBlank() ? "Business" : user.getName().trim());
+		// Left blank so the owner enters the real business name in the profile; blank keeps the profile incomplete.
+		business.setName("");
 		business.setEmail(user.getEmail() == null ? null : user.getEmail().trim().toLowerCase());
 		business.setPhone(phone == null ? null : phone.trim());
 		business.setAddress(locationAddress == null ? null : locationAddress.trim());

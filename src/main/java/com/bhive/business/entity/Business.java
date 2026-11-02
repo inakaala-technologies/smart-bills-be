@@ -61,6 +61,9 @@ public class Business {
     @Column(name = "memberships_enabled", nullable = false)
     private boolean membershipsEnabled = true;
 
+    @Column(name = "payslips_enabled", nullable = false)
+    private boolean payslipsEnabled;
+
     @Column(nullable = false)
     @Enumerated(EnumType.STRING)
     private BusinessStatus status = BusinessStatus.ACTIVE;
@@ -181,6 +184,15 @@ public class Business {
     public String getCity() { return city; }
     public void setCity(String city) { this.city = city; }
 
+    @Transient
+    @com.fasterxml.jackson.annotation.JsonProperty(value = "profileComplete", access = com.fasterxml.jackson.annotation.JsonProperty.Access.READ_ONLY)
+    public boolean isProfileComplete() {
+        return name != null && !name.isBlank()
+            && businessType != null && !businessType.isBlank()
+            && address != null && !address.isBlank()
+            && latitude != null && longitude != null;
+    }
+
     public String getBannerImageUrl() { return bannerImageUrl; }
     public void setBannerImageUrl(String bannerImageUrl) { this.bannerImageUrl = bannerImageUrl; }
 
@@ -207,6 +219,9 @@ public class Business {
     public void setHomeServicesEnabled(boolean homeServicesEnabled) {
         this.homeServicesEnabled = homeServicesEnabled;
     }
+
+    public boolean isPayslipsEnabled() { return payslipsEnabled; }
+    public void setPayslipsEnabled(boolean payslipsEnabled) { this.payslipsEnabled = payslipsEnabled; }
 
     public boolean isMembershipsEnabled() {
         return membershipsEnabled;

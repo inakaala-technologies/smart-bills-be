@@ -100,6 +100,7 @@ public class BusinessController {
         }
         List<NearbyBusinessSummary> nearby = businessRepository
             .findByStatusAndLatitudeIsNotNullAndLongitudeIsNotNull(BusinessStatus.ACTIVE).stream()
+            .filter(Business::isProfileComplete)
             .map(business -> new NearbyBusinessSummary(
                 business.getId(),
                 business.getName(),
@@ -491,6 +492,9 @@ public class BusinessController {
             if (business.getAddress() != null) {
                 existingBusiness.setAddress(business.getAddress());
             }
+            existingBusiness.setCountry(business.getCountry().trim());
+            existingBusiness.setRegion(business.getRegion().trim());
+            existingBusiness.setCity(business.getCity().trim());
             if (business.getLatitude() != null && business.getLongitude() != null) {
                 existingBusiness.setLatitude(business.getLatitude());
                 existingBusiness.setLongitude(business.getLongitude());

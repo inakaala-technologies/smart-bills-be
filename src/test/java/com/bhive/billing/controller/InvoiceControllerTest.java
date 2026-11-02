@@ -307,6 +307,30 @@ class InvoiceControllerTest {
     }
 
     @Test
+    void createPaidInvoiceShouldNotifyLinkedCustomer() throws Exception {
+        TenantContext.setTenantId(10L);
+        TenantContext.setUserId(20L);
+        Mockito.when(businessMembershipService.userHasAccessToBusiness(20L, 1L, 10L)).thenReturn(true);
+        Mockito.when(businessCustomerRepository.findByBusinessIdAndCustomerProfileId(1L, 2L))
+            .thenReturn(Optional.of(new BusinessCustomer()));
+        Mockito.when(invoiceRepository.save(Mockito.any(Invoice.class)))
+            .thenAnswer(invocation -> invocation.getArgument(0));
+        CustomerProfile customer = new CustomerProfile();
+        customer.setId(2L);
+        customer.setTenantId(10L);
+        customer.setUserId(30L);
+        Mockito.when(customerProfileRepository.findById(2L)).thenReturn(Optional.of(customer));
+
+        mockMvc.perform(post("/api/v1/billing/invoices")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"businessId\":1,\"customerId\":2,\"status\":\"PAID\",\"subtotal\":100.00,\"gstAmount\":18.00,\"totalAmount\":118.00}"))
+            .andExpect(status().isOk());
+
+        verify(notificationService).create(Mockito.eq(10L), Mockito.eq(30L), Mockito.eq("INVOICE_CREATED"),
+            Mockito.eq("New invoice"), Mockito.contains("marked as paid"), Mockito.eq("/dashboard"));
+    }
+
+    @Test
     void createPaidInvoiceShouldRejectDueDate() throws Exception {
         TenantContext.setTenantId(10L);
         TenantContext.setUserId(20L);

@@ -117,6 +117,8 @@ class BusinessOfferControllerTest {
 	@Test
 	void nearbyOffersIncludeBusinessDistance() {
 		Business business = business(10L, 3L, 12.0, 77.0);
+		business.setBusinessType("Restaurant");
+		business.setAddress("Local business address");
 		BusinessOffer offer = new BusinessOffer();
 		offer.setId(22L);
 		offer.setTenantId(3L);
