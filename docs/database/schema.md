@@ -17,6 +17,7 @@
 - membership_notifications
 - business location coordinates (latitude, longitude)
 - customer location (location_address, latitude, longitude)
+- saved_bills (customer/provider/category-linked bill fetch results)
 
 ## Key constraints
 - unique(business_id, invoice_number)
@@ -36,3 +37,4 @@ Apply `migrations/2026-10-19-loyalty-points.sql` before deploying loyalty rules 
 Apply `migrations/2026-10-20-loyalty-redemption.sql` before deploying point redemption settings and checkout integration in production.
 Apply `migrations/2026-10-21-business-features.sql` before deploying configurable business feature availability in production.
 Apply `migrations/2026-10-21-appointment-invoices.sql` before deploying automatic invoicing for completed appointments.
+Apply `migrations/2026-10-30-saved-bills.sql` before deploying saved electricity and water bill persistence.

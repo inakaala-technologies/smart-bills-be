@@ -11,6 +11,8 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.client.RestClientResponseException;
+import org.springframework.web.client.ResourceAccessException;
 
 @RestControllerAdvice
 public class ApiExceptionHandler {
@@ -38,6 +40,41 @@ public class ApiExceptionHandler {
         return error(status, exception.getReason() == null ? status.getReasonPhrase() : exception.getReason());
     }
 
+
+        @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<ApiError> handleIllegalArgument(
+            IllegalArgumentException exception) {
+
+        return error(HttpStatus.BAD_REQUEST, exception.getMessage());
+    }
+
+    @ExceptionHandler(RestClientResponseException.class)
+    public ResponseEntity<ApiError> handleProviderHttpError(
+            RestClientResponseException exception) {
+
+        LOGGER.error(
+                "API Setu returned HTTP status: {}",
+                exception.getStatusCode().value()
+        );
+
+        return error(
+                HttpStatus.BAD_GATEWAY,
+                "The bill provider returned an error. Please try again later."
+        );
+    }
+
+    @ExceptionHandler(ResourceAccessException.class)
+    public ResponseEntity<ApiError> handleProviderConnectionError(
+            ResourceAccessException exception) {
+
+        LOGGER.error("Unable to connect to the bill provider.", exception);
+
+        return error(
+                HttpStatus.BAD_GATEWAY,
+                "Unable to connect to the bill provider. Please try again later."
+        );
+    }
+    
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiError> handleUnexpectedException(Exception exception) {
         LOGGER.error("Unhandled API exception", exception);
