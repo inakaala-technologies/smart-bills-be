@@ -186,6 +186,7 @@ public class AuthController {
 		user.setPassword(passwordEncoder.encode(request.getPassword()));
 		user.setRole(request.getRole());
 		user.setTenantId(resolveTenantIdForRole(request.getRole(), null, null));
+		user.setPhone(phone);
 
 		User saved = userRepository.save(user);
 		ensureUserAccount(saved, saved.getRole(), null, null);
