@@ -139,9 +139,9 @@ public class S3ImageUploadService {
 			JSONObject secretJson = secretsService.getSecretAsJson(profile + "/bhive/s3");
 			String region = secretJson.getString("s3Region");
 			String bucketName = secretJson.getString("s3BucketName");
-			String key = withPrefix("payslips/" + sanitizeId(businessId.toString()) + "/"
+			String key = "payslips/" + sanitizeId(businessId.toString()) + "/"
 					+ sanitizeId(employeeId.toString()) + "/" + java.util.UUID.randomUUID()
-					+ extensionFromMime(contentType));
+					+ extensionFromMime(contentType);
 			s3Client.putObject(PutObjectRequest.builder().bucket(bucketName).key(key).contentType(contentType)
 					.cacheControl("private, no-store").build(), RequestBody.fromBytes(bytes));
 			return new StoredDocument("https://" + bucketName + ".s3." + region + ".amazonaws.com/" + key,
