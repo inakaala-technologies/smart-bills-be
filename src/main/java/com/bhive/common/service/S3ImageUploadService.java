@@ -20,7 +20,6 @@ import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.model.PutObjectResponse;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.util.StringUtils;
 
 @Slf4j
@@ -31,9 +30,6 @@ public class S3ImageUploadService {
 
 	@Value("${spring.profiles.active}")
 	private String profile;
-
-	@Value("${bhive.s3.prefix:}")
-	private String keyPrefix;
 
 	private final S3Client s3Client;
 
@@ -62,7 +58,7 @@ public class S3ImageUploadService {
 			String extension = extensionFromMime(contentType);
 
 			String safeId = sanitizeId(id);
-			String fileName = withPrefix("images/" + safeId + extension);
+			String fileName = "images/" + safeId + extension;
 
 			PutObjectRequest putObjectRequest = PutObjectRequest.builder().bucket(bucketName).key(fileName)
 					.contentType(contentType).build();
@@ -80,49 +76,15 @@ public class S3ImageUploadService {
 		}
 	}
 
-//	public String uploadBusinessOfferFile(MultipartFile file, String businessId, String offerId) {
-//		try {
-//			String secretName = profile + "/ts/s3";
-//			JSONObject secretJson = secretsService.getSecretAsJson(secretName);
-//
-//			String bucketName = secretJson.getString("s3BucketName");
-//			String region = secretJson.getString("s3Region");
-//
-//			String contentType = file.getContentType();
-//			String extension = extensionFromMime(contentType);
-//
-//			String fileName = withPrefix(
-//					"business_offers/" + sanitizeId(businessId) + "/" + sanitizeId(offerId) + extension);
-//
-//			PutObjectRequest request = PutObjectRequest.builder().bucket(bucketName).key(fileName)
-//					.contentType(contentType).build();
-//
-//			s3Client.putObject(request, RequestBody.fromBytes(file.getBytes()));
-//
-//			return "https://" + bucketName + ".s3." + region + ".amazonaws.com/" + fileName;
-//
-//		} catch (Exception e) {
-//			throw new RuntimeException("Business offer file upload failed", e);
-//		}
-//	}
-
 	public String uploadBusinessOfferFile(MultipartFile file, String businessId, String offerId) {
-
-		final String bucketName = "bhive-dev-uploads";
-
 		try {
-			// Retrieve the S3 region from the existing secret.
 			String secretName = profile + "/bhive/s3";
-
 			JSONObject secretJson = secretsService.getSecretAsJson(secretName);
+
+			String bucketName = secretJson.getString("s3BucketName");
 			String region = secretJson.getString("s3Region");
 
 			String contentType = file.getContentType();
-
-			if (!StringUtils.hasText(contentType)) {
-				throw new IllegalArgumentException("File content type is missing");
-			}
-
 			String extension = extensionFromMime(contentType);
 
 			String fileName = "business_offers/" + sanitizeId(businessId) + "/" + sanitizeId(offerId) + extension;
@@ -135,9 +97,6 @@ public class S3ImageUploadService {
 			return "https://" + bucketName + ".s3." + region + ".amazonaws.com/" + fileName;
 
 		} catch (Exception e) {
-			log.error("Business offer upload failed. businessId={}, offerId={}, bucket={}", businessId, offerId,
-					bucketName, e);
-
 			throw new RuntimeException("Business offer file upload failed", e);
 		}
 	}
@@ -179,7 +138,7 @@ public class S3ImageUploadService {
 			JSONObject secretJson = secretsService.getSecretAsJson(secretName);
 			String region = secretJson.getString("s3Region");
 			String bucketName = secretJson.getString("s3BucketName");
-			String key = withPrefix(keyPath);
+			String key = keyPath;
 
 			s3Client.putObject(
 					PutObjectRequest.builder().bucket(bucketName).key(key).contentType(contentType)
@@ -207,8 +166,7 @@ public class S3ImageUploadService {
 			return false;
 		}
 		return switch (contentType) {
-		case "image/jpeg" -> (bytes[0] & 0xFF) == 0xFF && (bytes[1] & 0xFF) == 0xD8
-				&& (bytes[2] & 0xFF) == 0xFF;
+		case "image/jpeg" -> (bytes[0] & 0xFF) == 0xFF && (bytes[1] & 0xFF) == 0xD8 && (bytes[2] & 0xFF) == 0xFF;
 		case "image/png" -> bytes[0] == (byte) 0x89 && bytes[1] == 0x50 && bytes[2] == 0x4E && bytes[3] == 0x47
 				&& bytes[4] == 0x0D && bytes[5] == 0x0A && bytes[6] == 0x1A && bytes[7] == 0x0A;
 		case "image/gif" -> bytes.length >= 6 && bytes[0] == 'G' && bytes[1] == 'I' && bytes[2] == 'F'
@@ -370,11 +328,6 @@ public class S3ImageUploadService {
 		} catch (Exception e) {
 			throw new RuntimeException("Error deleting image from S3", e);
 		}
-	}
-
-	private String withPrefix(String key) {
-		String prefix = keyPrefix == null ? "" : keyPrefix.trim().replaceAll("^/+|/+$", "");
-		return prefix.isEmpty() ? key : prefix + "/" + key;
 	}
 
 }

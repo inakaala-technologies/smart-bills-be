@@ -12,7 +12,6 @@ public record NearbyOfferSummary(
     String discountLabel,
     LocalDateTime endsAt,
     String attachmentUrl,
-    String attachmentType,
     String attachmentName,
     double distanceKm
 ) {}

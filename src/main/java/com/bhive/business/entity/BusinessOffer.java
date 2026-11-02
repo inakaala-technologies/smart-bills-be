@@ -60,9 +60,6 @@ public class BusinessOffer {
 	@Column(name = "attachment_url", length = 2048)
 	private String attachmentUrl;
 
-	@Column(name = "attachment_type", length = 20)
-	private String attachmentType;
-
 	@Column(name = "attachment_name", length = 255)
 	private String attachmentName;
 
@@ -172,14 +169,6 @@ public class BusinessOffer {
 
 	public void setAttachmentUrl(String attachmentUrl) {
 		this.attachmentUrl = attachmentUrl;
-	}
-
-	public String getAttachmentType() {
-		return attachmentType;
-	}
-
-	public void setAttachmentType(String attachmentType) {
-		this.attachmentType = attachmentType;
 	}
 
 	public String getAttachmentName() {
