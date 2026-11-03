@@ -19,6 +19,7 @@ import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
 import java.time.LocalDateTime;
+import java.util.UUID;
 
 @Entity
 @Table(
@@ -67,7 +68,7 @@ public class SavedBill {
     @Column(name = "provider_input_data", columnDefinition = "LONGTEXT", nullable = false)
     private String providerInputData;
 
-    @Column(name = "response_format", nullable = false, length = 20)
+    @Column(name = "response_format", length = 20)
     private String responseFormat;
 
     @Column(name = "content_type", length = 255)
@@ -85,8 +86,26 @@ public class SavedBill {
     @Column(name = "pdf_data", columnDefinition = "LONGBLOB")
     private byte[] pdfData;
 
-    @Column(name = "fetched_at", nullable = false)
+    @Column(name = "fetched_at")
     private LocalDateTime fetchedAt;
+
+    @Column(name = "fetch_status", nullable = false, length = 20)
+    private String fetchStatus = "PENDING";
+
+    @Column(name = "last_fetch_attempt_at")
+    private LocalDateTime lastFetchAttemptAt;
+
+    @Column(name = "last_fetch_error", length = 100)
+    private String lastFetchError;
+
+    @Column(name = "next_fetch_at")
+    private LocalDateTime nextFetchAt;
+
+    @Column(name = "fetch_retry_count", nullable = false)
+    private int fetchRetryCount;
+
+    @Column(name = "fetch_claim_token", length = 36)
+    private String fetchClaimToken;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
@@ -116,9 +135,6 @@ public class SavedBill {
         LocalDateTime now = LocalDateTime.now();
         createdAt = now;
         updatedAt = now;
-        if (fetchedAt == null) {
-            fetchedAt = now;
-        }
     }
 
     @PreUpdate
@@ -178,6 +194,30 @@ public class SavedBill {
         return fetchedAt;
     }
 
+    public String getFetchStatus() {
+        return fetchStatus;
+    }
+
+    public LocalDateTime getLastFetchAttemptAt() {
+        return lastFetchAttemptAt;
+    }
+
+    public String getLastFetchError() {
+        return lastFetchError;
+    }
+
+    public LocalDateTime getNextFetchAt() {
+        return nextFetchAt;
+    }
+
+    public int getFetchRetryCount() {
+        return fetchRetryCount;
+    }
+
+    public String getFetchClaimToken() {
+        return fetchClaimToken;
+    }
+
     public LocalDateTime getCreatedAt() {
         return createdAt;
     }
@@ -200,6 +240,70 @@ public class SavedBill {
         this.responseJson = responseJson;
         this.responseXml = responseXml;
         this.pdfData = pdfData;
-        this.fetchedAt = LocalDateTime.now();
+        LocalDateTime now = LocalDateTime.now();
+        this.fetchedAt = now;
+        this.lastFetchAttemptAt = now;
+        this.fetchStatus = "SUCCESS";
+        this.lastFetchError = null;
+        this.fetchRetryCount = 0;
+        this.fetchClaimToken = null;
+    }
+
+    public void prepareFetch(String providerInputData) {
+        prepareFetch(providerInputData, LocalDateTime.now());
+    }
+
+    public void prepareFetch(String providerInputData, LocalDateTime attemptedAt) {
+        this.providerInputData = providerInputData;
+        this.lastFetchAttemptAt = attemptedAt;
+        this.fetchStatus = "IN_PROGRESS";
+        this.lastFetchError = null;
+        this.fetchClaimToken = null;
+    }
+
+    public void markFetchFailed(String errorCode) {
+        this.fetchStatus = "FAILED";
+        this.lastFetchError = errorCode;
+        this.fetchClaimToken = null;
+    }
+
+    public void deferForConsent(LocalDateTime retryAt) {
+        this.fetchStatus = "FAILED";
+        this.lastFetchError = "CONSENT_UNAVAILABLE";
+        this.nextFetchAt = retryAt;
+        this.fetchClaimToken = null;
+    }
+
+    public void scheduleNextFetch(LocalDateTime nextFetchAt) {
+        this.nextFetchAt = nextFetchAt;
+    }
+
+    public void claimFetch(UUID claimToken, LocalDateTime attemptedAt) {
+        this.fetchStatus = "IN_PROGRESS";
+        this.lastFetchAttemptAt = attemptedAt;
+        this.lastFetchError = null;
+        this.fetchClaimToken = claimToken.toString();
+    }
+
+    public boolean ownsFetchClaim(UUID claimToken) {
+        return claimToken != null && claimToken.toString().equals(fetchClaimToken);
+    }
+
+    public int incrementFetchRetryCount() {
+        return ++fetchRetryCount;
+    }
+
+    public void scheduleRetry(LocalDateTime nextFetchAt, String errorCode) {
+        this.nextFetchAt = nextFetchAt;
+        this.fetchStatus = "FAILED";
+        this.lastFetchError = errorCode;
+        this.fetchClaimToken = null;
+    }
+
+    public void stopRetrying(String errorCode) {
+        this.nextFetchAt = null;
+        this.fetchStatus = "FAILED";
+        this.lastFetchError = errorCode;
+        this.fetchClaimToken = null;
     }
 }

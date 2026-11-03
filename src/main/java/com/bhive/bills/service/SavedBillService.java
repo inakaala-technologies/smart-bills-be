@@ -94,17 +94,37 @@ public class SavedBillService {
                 : serialize(response.jsonData());
         String responseFormat = response.format().trim().toUpperCase(Locale.ROOT);
 
+        persistenceService.completeManualFetch(
+                customerId,
+                normalizedProviderCode,
+                identity.hash(),
+                inputData,
+                responseFormat,
+                response.contentType(),
+                responseJson,
+                response.xmlData(),
+                response.pdfData()
+        );
+    }
+
+    public void prepareFetchAttempt(
+            String providerCode,
+            Map<String, String> providerInputs
+    ) {
+        if (providerInputs == null) {
+            throw new IllegalArgumentException("Provider inputs are required.");
+        }
+        Long customerId = requireAuthenticatedCustomerId();
+        String normalizedProviderCode = providerCode.trim().toUpperCase(Locale.ROOT);
+        ConsumerIdentity identity = identityResolver.resolve(normalizedProviderCode, providerInputs);
+        String inputData = serialize(providerInputs);
+
         try {
-            persistenceService.upsert(
+            persistenceService.prepareFetchAttempt(
                     customerId,
                     normalizedProviderCode,
                     identity,
-                    inputData,
-                    responseFormat,
-                    response.contentType(),
-                    responseJson,
-                    response.xmlData(),
-                    response.pdfData()
+                    inputData
             );
         } catch (DataIntegrityViolationException exception) {
             if (!persistenceService.identityExists(
@@ -114,18 +134,69 @@ public class SavedBillService {
             )) {
                 throw exception;
             }
-            persistenceService.upsert(
+            persistenceService.prepareFetchAttempt(
                     customerId,
                     normalizedProviderCode,
                     identity,
-                    inputData,
-                    responseFormat,
-                    response.contentType(),
-                    responseJson,
-                    response.xmlData(),
-                    response.pdfData()
+                    inputData
             );
         }
+    }
+
+    public void recordFetchFailure(
+            String providerCode,
+            Map<String, String> providerInputs,
+            String errorCode
+    ) {
+        if (providerInputs == null) {
+            throw new IllegalArgumentException("Provider inputs are required.");
+        }
+        Long customerId = requireAuthenticatedCustomerId();
+        String normalizedProviderCode = providerCode.trim().toUpperCase(Locale.ROOT);
+        ConsumerIdentity identity = identityResolver.resolve(normalizedProviderCode, providerInputs);
+        persistenceService.markFetchFailed(
+                customerId,
+                normalizedProviderCode,
+                identity.hash(),
+                errorCode
+        );
+    }
+
+    public void completeScheduledFetch(
+            ScheduledBillFetch claim,
+            ProviderFetchResponse response
+    ) {
+        validateResponse(response);
+        persistenceService.completeScheduledFetch(
+                claim,
+                response.format().trim().toUpperCase(Locale.ROOT),
+                response.contentType(),
+                response.jsonData() == null ? null : serialize(response.jsonData()),
+                response.xmlData(),
+                response.pdfData()
+        );
+    }
+
+    public void failScheduledFetch(
+            ScheduledBillFetch claim,
+            String errorCode,
+            boolean temporary,
+            long baseDelaySeconds,
+            long maxDelaySeconds,
+            int maxRetries
+    ) {
+        persistenceService.failScheduledFetch(
+                claim,
+                errorCode,
+                temporary,
+                baseDelaySeconds,
+                maxDelaySeconds,
+                maxRetries
+        );
+    }
+
+    public void deferScheduledFetch(ScheduledBillFetch claim, long deferHours) {
+        persistenceService.deferScheduledFetch(claim, deferHours);
     }
 
     @Transactional(readOnly = true)
@@ -137,8 +208,12 @@ public class SavedBillService {
             bills = savedBillRepository.findAllByCustomer_Id(customerId, safePageable);
         } else {
             String categoryCode = category.trim().toUpperCase(Locale.ROOT);
-            if (!"ELECTRICITY".equals(categoryCode) && !"WATER".equals(categoryCode)) {
-                throw new IllegalArgumentException("Category must be ELECTRICITY or WATER.");
+            if (!Set.of(
+                    "ELECTRICITY", "WATER", "ECHALLAN", "INSURANCE", "DOCUMENTS"
+            ).contains(categoryCode)) {
+                throw new IllegalArgumentException(
+                        "Category must be ELECTRICITY, WATER, ECHALLAN, INSURANCE, or DOCUMENTS."
+                );
             }
             bills = savedBillRepository.findAllByCustomer_IdAndCategory_Code(
                     customerId,

@@ -4,6 +4,7 @@ package com.bhive.bills.service;
 import com.bhive.bills.entity.BillCategory;
 import com.bhive.bills.entity.BillProvider;
 import com.bhive.bills.entity.ProviderInputField;
+import com.bhive.bills.config.ApiSetuServiceCatalog;
 import com.bhive.bills.repository.BillCategoryRepository;
 import com.bhive.bills.repository.BillProviderRepository;
 import com.bhive.bills.repository.ProviderInputFieldRepository;
@@ -39,9 +40,9 @@ public class BillCatalogInitializer implements CommandLineRunner {
         BillCategory water = category(
                 "WATER", "Water");
 
-        category("INSURANCE", "Insurance");
-        category("ECHALLAN", "E-challan");
-        category("DOCUMENTS", "Documents");
+        BillCategory insurance = category("INSURANCE", "Insurance");
+        BillCategory echallan = category("ECHALLAN", "E-challan");
+        BillCategory documents = category("DOCUMENTS", "Documents");
 
         // Electricity providers
         provider("KSEB",
@@ -89,8 +90,45 @@ public class BillCatalogInitializer implements CommandLineRunner {
                 "Karnataka Industrial Areas Development Board",
                 water);
 
+        seedApiSetuServices(echallan, insurance, documents);
+
         // Provider input fields
         seedProviderInputFields();
+        inputFieldRepository.flush();
+    }
+
+    private void seedApiSetuServices(
+            BillCategory echallan,
+            BillCategory insurance,
+            BillCategory documents
+    ) {
+        for (ApiSetuServiceCatalog.ServiceDefinition service
+                : ApiSetuServiceCatalog.services()) {
+            BillCategory serviceCategory = switch (service.categoryCode()) {
+                case "ECHALLAN" -> echallan;
+                case "DOCUMENTS" -> documents;
+                case "INSURANCE" -> insurance;
+                default -> throw new IllegalStateException(
+                        "Unsupported API Setu catalog category: " + service.categoryCode()
+                );
+            };
+
+            provider(service.code(), service.name(), serviceCategory);
+
+            int displayOrder = 1;
+            for (String field : service.inputFields()) {
+                seedField(
+                        service.code(),
+                        field,
+                        field,
+                        "text",
+                        true,
+                        "Enter " + field,
+                        null,
+                        displayOrder++
+                );
+            }
+        }
     }
 
     // Create or update category
@@ -260,11 +298,9 @@ public class BillCatalogInitializer implements CommandLineRunner {
 
         BillProvider provider = providerRepository
                 .findByCode(providerCode)
-                .orElse(null);
-
-        if (provider == null) {
-            return;
-        }
+                .orElseThrow(() -> new IllegalStateException(
+                        "Cannot seed input field for missing bill provider: " + providerCode
+                ));
 
         ProviderInputField field = inputFieldRepository
                 .findByProvider_CodeAndFieldKey(

@@ -74,6 +74,26 @@ class ConsumerIdentityResolverTest {
     }
 
     @Test
+    void resolves_new_service_identity_from_its_complete_documented_input_set() {
+        ConsumerIdentity identity = resolver.resolve(
+                "INS_PNB_METLIFE",
+                Map.of(
+                        "PMLIPolicyNo", "POL-1",
+                        "PMLIApplicationNo", "APP-1",
+                        "PMLINameAsPerPolicy", "NAME"
+                )
+        );
+
+        assertEquals("POL-1", identity.primaryConsumerNumber());
+        assertEquals(
+                java.util.List.of(
+                        "PMLIPolicyNo", "PMLIApplicationNo", "PMLINameAsPerPolicy"
+                ),
+                identity.fieldNames()
+        );
+    }
+
+    @Test
     void defines_identity_fields_for_every_supported_provider() {
         Map<String, Map<String, String>> inputs = new java.util.LinkedHashMap<>();
         inputs.put("KSEB", Map.of("ConsumerNo", "k"));

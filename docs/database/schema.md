@@ -38,3 +38,5 @@ Apply `migrations/2026-10-20-loyalty-redemption.sql` before deploying point rede
 Apply `migrations/2026-10-21-business-features.sql` before deploying configurable business feature availability in production.
 Apply `migrations/2026-10-21-appointment-invoices.sql` before deploying automatic invoicing for completed appointments.
 Apply `migrations/2026-10-30-saved-bills.sql` before deploying saved electricity and water bill persistence.
+Apply `migrations/2026-11-02-saved-bill-fetch-state.sql` to persist bill inputs before provider calls and track pending, successful, and failed fetch attempts.
+Apply `migrations/2026-11-02-saved-bill-scheduling.sql` after the fetch-state migration to enable due-time scheduling, retry counts, and database claim tokens.

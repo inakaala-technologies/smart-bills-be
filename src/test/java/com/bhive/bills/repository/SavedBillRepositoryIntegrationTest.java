@@ -15,9 +15,17 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 
+import java.time.Duration;
+import java.time.LocalDateTime;
+import java.util.UUID;
+
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @DataJpaTest(properties = {
         "spring.profiles.active=test",
@@ -44,14 +52,30 @@ class SavedBillRepositoryIntegrationTest {
     private BillProvider kseb;
     private BillProvider uppcl;
     private BillCategory electricity;
+    private BillCategory water;
+    private BillCategory echallan;
+    private BillCategory documents;
+    private BillProvider kiadb;
+    private BillProvider insuranceProvider;
+    private BillProvider challanProvider;
+    private BillProvider documentsProvider;
 
     @BeforeEach
     void setUp() {
         electricity = billCategoryRepository.saveAndFlush(
                 new BillCategory("ELECTRICITY", "Electricity")
         );
-        BillCategory water = billCategoryRepository.saveAndFlush(
+        water = billCategoryRepository.saveAndFlush(
                 new BillCategory("WATER", "Water")
+        );
+        BillCategory insurance = billCategoryRepository.saveAndFlush(
+                new BillCategory("INSURANCE", "Insurance")
+        );
+        echallan = billCategoryRepository.saveAndFlush(
+                new BillCategory("ECHALLAN", "E-challan")
+        );
+        documents = billCategoryRepository.saveAndFlush(
+                new BillCategory("DOCUMENTS", "Documents")
         );
 
         customerOne = customerProfileRepository.saveAndFlush(customer(101L));
@@ -62,8 +86,17 @@ class SavedBillRepositoryIntegrationTest {
         uppcl = billProviderRepository.saveAndFlush(
                 new BillProvider("UPPCL", "Uttar Pradesh Power Corporation", electricity)
         );
-        billProviderRepository.saveAndFlush(
+        kiadb = billProviderRepository.saveAndFlush(
                 new BillProvider("KIADB", "Karnataka Industrial Areas Development Board", water)
+        );
+        insuranceProvider = billProviderRepository.saveAndFlush(
+                new BillProvider("INS-1", "Insurance Provider", insurance)
+        );
+        challanProvider = billProviderRepository.saveAndFlush(
+                new BillProvider("CHALLAN-1", "Challan Provider", echallan)
+        );
+        documentsProvider = billProviderRepository.saveAndFlush(
+                new BillProvider("DOC-1", "Document Provider", documents)
         );
     }
 
@@ -108,9 +141,192 @@ class SavedBillRepositoryIntegrationTest {
         SavedBill storedXml = savedBillRepository.findById(xmlId).orElseThrow();
         SavedBill storedPdf = savedBillRepository.findById(pdfId).orElseThrow();
 
+        assertEquals("SUCCESS", storedJson.getFetchStatus());
         assertEquals("{\"providerField\":7}", storedJson.getResponseJson());
+        assertNotNull(storedJson.getFetchedAt());
         assertEquals("<Bill><Amount>7</Amount></Bill>", storedXml.getResponseXml());
         assertArrayEquals(pdfBytes, storedPdf.getPdfData());
+    }
+
+    @Test
+    void persists_fetch_attempt_before_any_provider_response_exists() {
+        SavedBill pendingBill = new SavedBill(
+                customerOne,
+                kseb,
+                electricity,
+                "K-1",
+                "pending-identity"
+        );
+        pendingBill.prepareFetch("{\"ConsumerNo\":\"K-1\"}");
+
+        Long id = savedBillRepository.saveAndFlush(pendingBill).getId();
+        entityManager.clear();
+
+        SavedBill storedBill = savedBillRepository.findById(id).orElseThrow();
+        assertEquals("IN_PROGRESS", storedBill.getFetchStatus());
+        assertEquals("{\"ConsumerNo\":\"K-1\"}", storedBill.getProviderInputData());
+        assertNull(storedBill.getResponseFormat());
+        assertNull(storedBill.getFetchedAt());
+        assertNotNull(storedBill.getLastFetchAttemptAt());
+    }
+
+    @Test
+    void persists_failure_status_without_replacing_the_previous_successful_response() {
+        SavedBill existingBill = savedBill(
+                customerOne,
+                kseb,
+                "K-1",
+                "failed-retry-identity"
+        );
+        existingBill.updateResponse(
+                "{\"ConsumerNo\":\"K-1\"}",
+                "JSON",
+                "application/json",
+                "{\"bill\":\"previous-success\"}",
+                null,
+                null
+        );
+        LocalDateTime successfulFetchAt = existingBill.getFetchedAt();
+        existingBill.prepareFetch("{\"ConsumerNo\":\"K-1\"}");
+        existingBill.markFetchFailed("PROVIDER_HTTP_ERROR");
+
+        Long id = savedBillRepository.saveAndFlush(existingBill).getId();
+        entityManager.clear();
+
+        SavedBill storedBill = savedBillRepository.findById(id).orElseThrow();
+        assertEquals("FAILED", storedBill.getFetchStatus());
+        assertEquals("PROVIDER_HTTP_ERROR", storedBill.getLastFetchError());
+        assertEquals("{\"ConsumerNo\":\"K-1\"}", storedBill.getProviderInputData());
+        assertEquals("{\"bill\":\"previous-success\"}", storedBill.getResponseJson());
+        assertTrue(Math.abs(Duration.between(
+                successfulFetchAt,
+                storedBill.getFetchedAt()
+        ).toNanos()) <= 1_000);
+    }
+
+    @Test
+    void atomically_claims_due_and_stale_records_only_once() {
+        LocalDateTime now = LocalDateTime.now();
+        SavedBill dueBill = savedBill(
+                customerOne,
+                kseb,
+                "K-1",
+                "due-identity"
+        );
+        dueBill.updateResponse("{}", "JSON", "application/json", "{}", null, null);
+        dueBill.scheduleNextFetch(now.minusMinutes(1));
+        SavedBill staleBill = new SavedBill(
+                customerOne,
+                kseb,
+                electricity,
+                "K-2",
+                "stale-identity"
+        );
+        staleBill.prepareFetch("{\"ConsumerNo\":\"K-2\"}");
+        staleBill.claimFetch(UUID.randomUUID(), now.minusHours(1));
+        Long dueId = savedBillRepository.saveAndFlush(dueBill).getId();
+        Long staleId = savedBillRepository.saveAndFlush(staleBill).getId();
+
+        var candidates = savedBillRepository.findEligibleFetchIds(
+                now,
+                now.minusMinutes(15),
+                PageRequest.of(0, 10)
+        );
+
+        assertEquals(2, candidates.size());
+        assertEquals(1, savedBillRepository.claimEligibleFetch(
+                dueId,
+                "claim-due",
+                now,
+                now.minusMinutes(15)
+        ));
+        assertEquals(0, savedBillRepository.claimEligibleFetch(
+                dueId,
+                "duplicate-claim",
+                now,
+                now.minusMinutes(15)
+        ));
+        assertEquals(1, savedBillRepository.claimEligibleFetch(
+                staleId,
+                "recover-stale",
+                now,
+                now.minusMinutes(15)
+        ));
+        entityManager.clear();
+        assertEquals(
+                "recover-stale",
+                savedBillRepository.findById(staleId).orElseThrow().getFetchClaimToken()
+        );
+    }
+
+    @Test
+    void selects_due_electricity_water_and_challan_but_excludes_documents_and_insurance() {
+        LocalDateTime now = LocalDateTime.now();
+        SavedBill dueWater = savedBill(customerOne, kiadb, "W-1", "due-water");
+        dueWater.scheduleNextFetch(now.minusMinutes(1));
+        SavedBill activeManual = new SavedBill(
+                customerOne, kseb, electricity, "K-1", "active-manual"
+        );
+        activeManual.prepareFetch("{\"ConsumerNo\":\"K-1\"}");
+        SavedBill dueInsurance = savedBill(
+                customerOne, insuranceProvider, "I-1", "due-insurance"
+        );
+        dueInsurance.scheduleNextFetch(now.minusMinutes(1));
+        SavedBill dueChallan = savedBill(
+                customerOne, challanProvider, "C-1", "due-challan"
+        );
+        dueChallan.scheduleNextFetch(now.minusMinutes(1));
+        SavedBill dueDocument = savedBill(
+                customerOne, documentsProvider, "D-1", "due-document"
+        );
+        dueDocument.scheduleNextFetch(now.minusMinutes(1));
+        Long dueWaterId = savedBillRepository.saveAndFlush(dueWater).getId();
+        Long manualId = savedBillRepository.saveAndFlush(activeManual).getId();
+        Long insuranceId = savedBillRepository.saveAndFlush(dueInsurance).getId();
+        Long challanId = savedBillRepository.saveAndFlush(dueChallan).getId();
+        Long documentId = savedBillRepository.saveAndFlush(dueDocument).getId();
+
+        var candidates = savedBillRepository.findEligibleFetchIds(
+                now,
+                now.minusMinutes(15),
+                PageRequest.of(0, 10)
+        );
+
+        assertTrue(candidates.contains(dueWaterId));
+        assertTrue(candidates.contains(challanId));
+        assertFalse(candidates.contains(manualId));
+        assertFalse(candidates.contains(insuranceId));
+        assertFalse(candidates.contains(documentId));
+        assertEquals(1, savedBillRepository.claimEligibleFetch(
+                dueWaterId,
+                "claim-water",
+                now,
+                now.minusMinutes(15)
+        ));
+        assertEquals(0, savedBillRepository.claimEligibleFetch(
+                manualId,
+                "claim-manual",
+                now,
+                now.minusMinutes(15)
+        ));
+        assertEquals(0, savedBillRepository.claimEligibleFetch(
+                insuranceId,
+                "claim-insurance",
+                now,
+                now.minusMinutes(15)
+        ));
+        assertEquals(1, savedBillRepository.claimEligibleFetch(
+                challanId,
+                "claim-challan",
+                now,
+                now.minusMinutes(15)
+        ));
+        assertEquals(0, savedBillRepository.claimEligibleFetch(
+                documentId,
+                "claim-document",
+                now,
+                now.minusMinutes(15)
+        ));
     }
 
     @Test

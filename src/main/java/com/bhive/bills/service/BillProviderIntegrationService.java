@@ -6,12 +6,17 @@ import com.bhive.bills.provider.BillProviderAdapter;
 import com.bhive.bills.provider.BillProviderAdapterRegistry;
 import com.bhive.bills.provider.BillProviderRequest;
 import com.bhive.bills.provider.ProviderFetchResponse;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.bhive.bills.repository.BillProviderRepository;
 import com.bhive.bills.repository.ProviderInputFieldRepository;
 import com.bhive.bills.entity.BillProvider;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.ResourceAccessException;
+import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.HashSet;
@@ -22,6 +27,14 @@ import java.util.Set;
 
 @Service
 public class BillProviderIntegrationService {
+
+    private static final Set<String> MANUALLY_FETCHABLE_CATEGORIES =
+            Set.of("ELECTRICITY", "WATER", "ECHALLAN", "INSURANCE", "DOCUMENTS");
+    private static final Set<String> SCHEDULED_CATEGORIES =
+            Set.of("ELECTRICITY", "WATER", "ECHALLAN");
+
+    private static final Logger LOGGER =
+            LoggerFactory.getLogger(BillProviderIntegrationService.class);
 
     private final BillProviderAdapterRegistry adapterRegistry;
     private final ProviderInputFieldRepository inputFieldRepository;
@@ -71,23 +84,72 @@ public class BillProviderIntegrationService {
         );
 
         String categoryCode = provider.getCategory().getCode();
-        if (!"ELECTRICITY".equals(categoryCode) && !"WATER".equals(categoryCode)) {
+        if (!MANUALLY_FETCHABLE_CATEGORIES.contains(categoryCode)) {
             throw new ResponseStatusException(
                     HttpStatus.UNPROCESSABLE_ENTITY,
-                    "Only electricity and water bills can be fetched and saved."
+                    "This bill category does not support manual fetching."
             );
         }
 
-        savedBillService.requireAuthenticatedCustomerId();
+        savedBillService.prepareFetchAttempt(providerCode, request.providerInputs());
 
-        // Fetch bill in JSON, XML, or PDF format
-        ProviderFetchResponse response = adapter.fetchBill(
-                providerCode,
-                request.providerInputs(),
-                request.consentArtifact()
-        );
-        savedBillService.saveFetchedBill(providerCode, request.providerInputs(), response);
-        return response;
+        try {
+            ProviderFetchResponse response = adapter.fetchBill(
+                    providerCode,
+                    request.providerInputs(),
+                    request.consentArtifact()
+            );
+            savedBillService.saveFetchedBill(providerCode, request.providerInputs(), response);
+            return response;
+        } catch (RuntimeException failure) {
+            try {
+                savedBillService.recordFetchFailure(
+                        providerCode,
+                        request.providerInputs(),
+                        fetchFailureCode(failure)
+                );
+            } catch (RuntimeException persistenceFailure) {
+                failure.addSuppressed(persistenceFailure);
+                LOGGER.error(
+                        "Could not record failed bill fetch for provider {}.",
+                        providerCode,
+                        persistenceFailure
+                );
+            }
+            throw failure;
+        }
+    }
+
+    public ProviderFetchResponse fetchScheduledBill(
+            String providerCode,
+            Map<String, String> providerInputs,
+            JsonNode consentArtifact
+    ) {
+        BillProvider provider = providerRepository.findByCodeAndActiveTrue(providerCode)
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.NOT_FOUND,
+                        "Provider not found or inactive."
+                ));
+        String categoryCode = provider.getCategory().getCode();
+        if (!SCHEDULED_CATEGORIES.contains(categoryCode)) {
+            throw new ResponseStatusException(
+                    HttpStatus.UNPROCESSABLE_ENTITY,
+                    "This bill category cannot be scheduled."
+            );
+        }
+        validateProviderInputs(providerCode, providerInputs);
+        return adapterRegistry.getAdapter(providerCode)
+                .fetchBill(providerCode, providerInputs, consentArtifact);
+    }
+
+    private String fetchFailureCode(RuntimeException failure) {
+        if (failure instanceof ResourceAccessException) {
+            return "PROVIDER_CONNECTION_ERROR";
+        }
+        if (failure instanceof RestClientResponseException) {
+            return "PROVIDER_HTTP_ERROR";
+        }
+        return "PROVIDER_FETCH_ERROR";
     }
 
     private void validateProviderInputs(

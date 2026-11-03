@@ -83,8 +83,8 @@ class SavedBillServiceTest {
                 new ProviderFetchResponse("JSON", "application/json", json, null, null)
         );
 
-        verify(persistenceService).upsert(
-                30L, "KSEB", new ConsumerIdentity("K-1", "hash", List.of("ConsumerNo")),
+        verify(persistenceService).completeManualFetch(
+                30L, "KSEB", "hash",
                 "{\"ConsumerNo\":\"K-1\"}", "JSON", "application/json",
                 "{\"billNo\":\"B-1\"}", null, null
         );
@@ -106,36 +106,20 @@ class SavedBillServiceTest {
                 new ProviderFetchResponse("PDF", "application/pdf", null, null, pdf)
         );
 
-        verify(persistenceService).upsert(
-                30L, "KIADB", new ConsumerIdentity("R-1", "hash", List.of("RegNum")),
+        verify(persistenceService).completeManualFetch(
+                30L, "KIADB", "hash",
                 "{\"RegNum\":\"R-1\"}", "PDF", "application/pdf", null, null, pdf
         );
     }
 
     @Test
-    void retries_a_concurrent_insert_after_database_unique_constraint_race() {
+    void completes_only_the_previously_prepared_manual_fetch() {
         TenantContext.setUserId(10L);
         TenantContext.setTenantId(20L);
         when(customerProfileRepository.findByUserIdAndTenantId(10L, 20L))
                 .thenReturn(Optional.of(customer(30L)));
         when(identityResolver.resolve("KSEB", Map.of("ConsumerNo", "K-1")))
                 .thenReturn(new ConsumerIdentity("K-1", "hash", List.of("ConsumerNo")));
-        doThrow(new DataIntegrityViolationException("duplicate key"))
-                .doReturn(null)
-                .when(persistenceService)
-                .upsert(
-                        30L,
-                        "KSEB",
-                        new ConsumerIdentity("K-1", "hash", List.of("ConsumerNo")),
-                        "{\"ConsumerNo\":\"K-1\"}",
-                        "JSON",
-                        "application/json",
-                        "{\"billNo\":\"B-1\"}",
-                        null,
-                        null
-                );
-        when(persistenceService.identityExists(30L, "KSEB", "hash")).thenReturn(true);
-
         savedBillService.saveFetchedBill(
                 "KSEB",
                 Map.of("ConsumerNo", "K-1"),
@@ -148,10 +132,10 @@ class SavedBillServiceTest {
                 )
         );
 
-        verify(persistenceService, org.mockito.Mockito.times(2)).upsert(
+        verify(persistenceService).completeManualFetch(
                 30L,
                 "KSEB",
-                new ConsumerIdentity("K-1", "hash", List.of("ConsumerNo")),
+                "hash",
                 "{\"ConsumerNo\":\"K-1\"}",
                 "JSON",
                 "application/json",
@@ -185,7 +169,7 @@ class SavedBillServiceTest {
                         new ProviderFetchResponse("JSON", "application/json", null, null, null)
                 )
         );
-        verify(persistenceService, never()).upsert(
+        verify(persistenceService, never()).completeManualFetch(
                 any(), any(), any(), any(), any(), any(), any(), any(), any()
         );
     }

@@ -1,6 +1,7 @@
 
 package com.bhive.bills.config;
 
+import jakarta.annotation.PostConstruct;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 import java.util.HashMap;
@@ -45,6 +46,11 @@ public class ApiSetuProperties {
 
     public void setProviders(Map<String, ProviderConfig> providers) {
         this.providers = providers;
+    }
+
+    @PostConstruct
+    void registerDocumentedServices() {
+        ApiSetuServiceCatalog.registerProviderConfigurations(this);
     }
 
     public static class ProviderConfig {

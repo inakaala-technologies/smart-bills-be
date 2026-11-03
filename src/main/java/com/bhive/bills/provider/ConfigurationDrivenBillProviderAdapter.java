@@ -141,10 +141,9 @@ public class ConfigurationDrivenBillProviderAdapter
                 .exchange((clientRequest, clientResponse) -> {
 
                     if (!clientResponse.getStatusCode().is2xxSuccessful()) {
-                        throw new IllegalStateException(
-                                "Provider API returned HTTP status: "
-                                        + clientResponse.getStatusCode()
-                                        + " for provider: " + providerCode
+                        throw new ProviderApiException(
+                                clientResponse.getStatusCode(),
+                                providerCode
                         );
                     }
 

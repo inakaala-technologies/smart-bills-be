@@ -1,5 +1,6 @@
 package com.bhive.bills.service;
 
+import com.bhive.bills.config.ApiSetuServiceCatalog;
 import org.springframework.stereotype.Component;
 
 import java.nio.charset.StandardCharsets;
@@ -32,6 +33,11 @@ public class ConsumerIdentityResolver {
                 ? ""
                 : providerCode.trim().toUpperCase(Locale.ROOT);
         List<String> fields = IDENTITY_FIELDS.get(normalizedProviderCode);
+        if (fields == null) {
+            fields = ApiSetuServiceCatalog.find(normalizedProviderCode)
+                    .map(ApiSetuServiceCatalog.ServiceDefinition::inputFields)
+                    .orElse(null);
+        }
         if (fields == null) {
             throw new IllegalArgumentException(
                     "No consumer identity mapping is configured for provider: "
