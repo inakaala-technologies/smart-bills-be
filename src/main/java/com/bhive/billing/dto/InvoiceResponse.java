@@ -6,6 +6,8 @@ import com.bhive.billing.entity.InvoiceStatus;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.util.List;
 
 public record InvoiceResponse(
     Long id,
@@ -23,8 +25,9 @@ public record InvoiceResponse(
     Integer loyaltyPointsRedeemed,
     BigDecimal loyaltyDiscountAmount,
     InvoiceStatus status,
-    LocalDateTime createdAt,
-    LocalDateTime updatedAt
+    String createdAt,
+    String updatedAt,
+    List<InvoiceLineItemView> items
 ) {
     public static InvoiceResponse from(Invoice invoice) {
         return new InvoiceResponse(
@@ -32,7 +35,14 @@ public record InvoiceResponse(
             invoice.getIssueDate(), invoice.getDueDate(), invoice.getSubtotal(), invoice.getGstAmount(),
             invoice.getTotalAmount(), invoice.getInvoiceDiscountAmount(), invoice.getInvoiceDiscountType(),
             invoice.getInvoiceDiscountValue(), invoice.getLoyaltyPointsRedeemed(), invoice.getLoyaltyDiscountAmount(),
-            invoice.getStatus(), invoice.getCreatedAt(), invoice.getUpdatedAt()
+            invoice.getStatus(),
+            toUtcTimestamp(invoice.getCreatedAt()),
+            toUtcTimestamp(invoice.getUpdatedAt()),
+            invoice.getLineItems().stream().map(InvoiceLineItemView::from).toList()
         );
+    }
+
+    private static String toUtcTimestamp(LocalDateTime value) {
+        return value == null ? null : value.atOffset(ZoneOffset.UTC).toString();
     }
 }

@@ -4,6 +4,9 @@ import jakarta.persistence.*;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.List;
 
 @Entity
 @Table(name = "invoices")
@@ -56,6 +59,9 @@ public class Invoice {
     @Column(name = "loyalty_discount_amount", nullable = false, precision = 12, scale = 2)
     private BigDecimal loyaltyDiscountAmount = BigDecimal.ZERO;
 
+    @OneToMany(mappedBy = "invoice", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<InvoiceLineItem> lineItems = new ArrayList<>();
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private InvoiceStatus status = InvoiceStatus.DRAFT;
@@ -68,13 +74,13 @@ public class Invoice {
 
     @PrePersist
     protected void onCreate() {
-        createdAt = LocalDateTime.now();
-        updatedAt = LocalDateTime.now();
+        createdAt = LocalDateTime.now(ZoneOffset.UTC);
+        updatedAt = LocalDateTime.now(ZoneOffset.UTC);
     }
 
     @PreUpdate
     protected void onUpdate() {
-        updatedAt = LocalDateTime.now();
+        updatedAt = LocalDateTime.now(ZoneOffset.UTC);
     }
 
     public Long getId() {
@@ -208,5 +214,14 @@ public class Invoice {
 
     public void setUpdatedAt(LocalDateTime updatedAt) {
         this.updatedAt = updatedAt;
+    }
+
+    public List<InvoiceLineItem> getLineItems() {
+        return lineItems;
+    }
+
+    public void addLineItem(InvoiceLineItem lineItem) {
+        lineItems.add(lineItem);
+        lineItem.setInvoice(this);
     }
 }

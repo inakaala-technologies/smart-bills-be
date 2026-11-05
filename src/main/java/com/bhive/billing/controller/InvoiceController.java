@@ -2,8 +2,10 @@ package com.bhive.billing.controller;
 
 import com.bhive.billing.entity.Invoice;
 import com.bhive.billing.entity.InvoiceDiscountType;
+import com.bhive.billing.entity.InvoiceLineItem;
 import com.bhive.billing.entity.InvoiceStatus;
 import com.bhive.billing.dto.InvoiceCreateRequest;
+import com.bhive.billing.dto.InvoiceLineItemRequest;
 import com.bhive.billing.dto.InvoiceResponse;
 import com.bhive.billing.repository.InvoiceRepository;
 import com.bhive.business.service.BusinessMembershipService;
@@ -18,6 +20,7 @@ import com.bhive.family.repository.FamilyMemberRepository;
 import com.bhive.notification.service.NotificationService;
 import com.bhive.loyalty.service.LoyaltyService;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -150,7 +153,8 @@ public class InvoiceController {
             || (request.invoiceDiscountType() != null && request.invoiceDiscountType() == InvoiceDiscountType.PERCENTAGE
                 && invoiceDiscountValue.compareTo(BigDecimal.valueOf(100)) > 0)
             || (request.invoiceDiscountType() != null && expectedDiscountAmount.compareTo(invoiceDiscountAmount) != 0)
-            || request.totalAmount().compareTo(grossAmount.subtract(invoiceDiscountAmount)) != 0) {
+            || request.totalAmount().compareTo(grossAmount.subtract(invoiceDiscountAmount)) != 0
+            || !itemTotalsMatch(request)) {
             return ResponseEntity.badRequest().build();
         }
         if ((request.status() != InvoiceStatus.DRAFT && request.status() != InvoiceStatus.SENT && request.status() != InvoiceStatus.PAID)
@@ -186,6 +190,14 @@ public class InvoiceController {
         invoice.setInvoiceDiscountValue(invoiceDiscountValue);
         invoice.setTotalAmount(request.totalAmount());
         invoice.setStatus(request.status());
+        if (request.items() != null) {
+            request.items().forEach(item -> invoice.addLineItem(new InvoiceLineItem(
+                item.productName().trim(),
+                item.quantity(),
+                item.unitPrice(),
+                item.gstRate()
+            )));
+        }
         Invoice saved = invoiceRepository.save(invoice);
         if (saved.getStatus() == InvoiceStatus.PAID) {
             loyaltyService.awardInvoiceIfConfigured(tenantId, saved.getBusinessId(), saved.getCustomerId(),
@@ -208,6 +220,26 @@ public class InvoiceController {
                 ));
         }
         return ResponseEntity.ok(InvoiceResponse.from(responseInvoice));
+    }
+
+    private boolean itemTotalsMatch(InvoiceCreateRequest request) {
+        List<InvoiceLineItemRequest> items = request.items();
+        if (items == null || items.isEmpty()) {
+            return true;
+        }
+
+        BigDecimal subtotal = items.stream()
+            .map(item -> item.quantity().multiply(item.unitPrice()))
+            .reduce(BigDecimal.ZERO, BigDecimal::add)
+            .setScale(2, RoundingMode.HALF_UP);
+        BigDecimal gstAmount = items.stream()
+            .map(item -> item.quantity().multiply(item.unitPrice()).multiply(item.gstRate())
+                .divide(BigDecimal.valueOf(100)))
+            .reduce(BigDecimal.ZERO, BigDecimal::add)
+            .setScale(2, RoundingMode.HALF_UP);
+
+        return subtotal.compareTo(request.subtotal()) == 0
+            && gstAmount.compareTo(request.gstAmount()) == 0;
     }
 
 	@PatchMapping("/invoices/{id}/status")

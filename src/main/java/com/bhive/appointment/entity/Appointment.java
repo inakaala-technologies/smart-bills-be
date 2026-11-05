@@ -22,6 +22,12 @@ public class Appointment {
     @Column(name = "staff_user_id")
     private Long staffUserId;
 
+    @Column(name = "staff_id")
+    private Long staffId;
+
+    @Transient
+    private String staffName;
+
     @Column(name = "appointment_service_id")
     private Long appointmentServiceId;
 
@@ -118,6 +124,22 @@ public class Appointment {
 
     public void setStaffUserId(Long staffUserId) {
         this.staffUserId = staffUserId;
+    }
+
+    public Long getStaffId() {
+        return staffId;
+    }
+
+    public void setStaffId(Long staffId) {
+        this.staffId = staffId;
+    }
+
+    public String getStaffName() {
+        return staffName;
+    }
+
+    public void setStaffName(String staffName) {
+        this.staffName = staffName;
     }
 
     public Long getAppointmentServiceId() {

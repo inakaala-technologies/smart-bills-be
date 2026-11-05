@@ -27,3 +27,5 @@ http://<EC2-public-ip>:8084
 ```
 
 Allow inbound TCP 8084 only from the networks that need access; avoid opening it broadly to the internet. Existing host Nginx sites and listeners are left unchanged.
+
+The application uses `Asia/Kolkata` for server-side business dates, while invoice event timestamps are stored and returned in UTC with an explicit offset for correct display. Keep the EC2 host clock in UTC; existing database datetime values are not rewritten during deployment.

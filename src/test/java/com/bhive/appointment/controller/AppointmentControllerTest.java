@@ -2,9 +2,11 @@ package com.bhive.appointment.controller;
 
 import com.bhive.appointment.entity.Appointment;
 import com.bhive.appointment.entity.AppointmentService;
+import com.bhive.appointment.entity.AppointmentStaff;
 import com.bhive.appointment.entity.AppointmentStatus;
 import com.bhive.appointment.repository.AppointmentRepository;
 import com.bhive.appointment.repository.AppointmentServiceRepository;
+import com.bhive.appointment.repository.AppointmentStaffRepository;
 import com.bhive.appointment.service.AppointmentBillingService;
 import com.bhive.business.entity.Business;
 import com.bhive.business.entity.BusinessUser;
@@ -52,6 +54,9 @@ class AppointmentControllerTest {
 
     @MockBean
     private AppointmentServiceRepository appointmentServiceRepository;
+
+    @MockBean
+    private AppointmentStaffRepository appointmentStaffRepository;
 
     @MockBean
     private BusinessMembershipService businessMembershipService;
@@ -114,6 +119,102 @@ class AppointmentControllerTest {
     }
 
     @Test
+    void businessCanAddStaffUsingContactAlreadyBelongingToABHiveAccountWithoutChangingIt() throws Exception {
+        CustomerProfile existingAccount = new CustomerProfile();
+        existingAccount.setTenantId(5L);
+        existingAccount.setUserId(22L);
+        existingAccount.setName("Alex Staff");
+        existingAccount.setEmail("alex@example.com");
+        Mockito.when(businessMembershipService.userHasAccessToBusiness(9L, 1L, 5L)).thenReturn(true);
+        Mockito.when(customerProfileRepository.findFirstByEmailIgnoreCaseAndTenantIdAndUserIdIsNotNull("alex@example.com", 5L))
+            .thenReturn(Optional.of(existingAccount));
+        Mockito.when(appointmentStaffRepository.findByTenantIdAndBusinessIdAndStatusIgnoreCaseOrderByNameAsc(5L, 1L, "ACTIVE"))
+            .thenReturn(List.of());
+        Mockito.when(appointmentStaffRepository.save(Mockito.any(AppointmentStaff.class)))
+            .thenAnswer(invocation -> {
+                AppointmentStaff staff = invocation.getArgument(0);
+                staff.setId(61L);
+                return staff;
+            });
+
+        mockMvc.perform(post("/api/v1/businesses/1/appointment-staff")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"Alex Staff\",\"email\":\"alex@example.com\",\"phone\":\"555-0101\"}"))
+            .andExpect(status().isCreated())
+            .andExpect(jsonPath("$.staffId").value(61))
+            .andExpect(jsonPath("$.label").value("Alex Staff"));
+
+        Mockito.verify(businessUserRepository, Mockito.never()).save(Mockito.any(BusinessUser.class));
+        Mockito.verify(customerProfileRepository, Mockito.never()).save(Mockito.any(CustomerProfile.class));
+    }
+
+    @Test
+    void businessCanAddStaffWithoutABHiveAccount() throws Exception {
+        Mockito.when(businessMembershipService.userHasAccessToBusiness(9L, 1L, 5L)).thenReturn(true);
+        Mockito.when(appointmentStaffRepository.findByTenantIdAndBusinessIdAndStatusIgnoreCaseOrderByNameAsc(5L, 1L, "ACTIVE"))
+            .thenReturn(List.of());
+        Mockito.when(appointmentStaffRepository.save(Mockito.any(AppointmentStaff.class)))
+            .thenAnswer(invocation -> {
+                AppointmentStaff staff = invocation.getArgument(0);
+                staff.setId(62L);
+                return staff;
+            });
+
+        mockMvc.perform(post("/api/v1/businesses/1/appointment-staff")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"External Staff\",\"phone\":\"555-0102\"}"))
+            .andExpect(status().isCreated())
+            .andExpect(jsonPath("$.staffId").value(62))
+            .andExpect(jsonPath("$.label").value("External Staff"))
+            .andExpect(jsonPath("$.phone").value("555-0102"));
+
+        Mockito.verify(businessUserRepository, Mockito.never()).save(Mockito.any(BusinessUser.class));
+        Mockito.verifyNoInteractions(customerProfileRepository);
+    }
+
+    @Test
+    void existingBusinessUsersRemainAvailableAsLegacyStaff() throws Exception {
+        BusinessUser legacyMember = new BusinessUser();
+        legacyMember.setTenantId(5L);
+        legacyMember.setBusinessId(1L);
+        legacyMember.setUserId(22L);
+        legacyMember.setStatus("ACTIVE");
+        CustomerProfile profile = new CustomerProfile();
+        profile.setTenantId(5L);
+        profile.setUserId(22L);
+        profile.setName("Legacy Staff");
+        profile.setEmail("legacy@example.com");
+        AppointmentStaff legacyStaff = new AppointmentStaff();
+        legacyStaff.setId(63L);
+        legacyStaff.setTenantId(5L);
+        legacyStaff.setBusinessId(1L);
+        legacyStaff.setName("Legacy Staff");
+        legacyStaff.setEmail("legacy@example.com");
+        legacyStaff.setLinkedUserId(22L);
+        legacyStaff.setStatus("ACTIVE");
+
+        Mockito.when(businessMembershipService.userHasAccessToBusiness(9L, 1L, 5L)).thenReturn(true);
+        Mockito.when(businessUserRepository.findByBusinessId(1L)).thenReturn(List.of(legacyMember));
+        Mockito.when(appointmentStaffRepository.findByTenantIdAndBusinessIdAndLinkedUserId(5L, 1L, 22L))
+            .thenReturn(Optional.empty());
+        Mockito.when(customerProfileRepository.findByUserIdAndTenantId(22L, 5L)).thenReturn(Optional.of(profile));
+        Mockito.when(appointmentStaffRepository.save(Mockito.any(AppointmentStaff.class)))
+            .thenAnswer(invocation -> {
+                AppointmentStaff staff = invocation.getArgument(0);
+                staff.setId(63L);
+                return staff;
+            });
+        Mockito.when(appointmentStaffRepository.findByTenantIdAndBusinessIdAndStatusIgnoreCaseOrderByNameAsc(5L, 1L, "ACTIVE"))
+            .thenReturn(List.of(legacyStaff));
+
+        mockMvc.perform(get("/api/v1/businesses/1/appointment-staff"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$[0].staffId").value(63))
+            .andExpect(jsonPath("$[0].label").value("Legacy Staff"))
+            .andExpect(jsonPath("$[0].userId").value(22));
+    }
+
+    @Test
     void customerBookingUsesSignedInProfileAndStartsBooked() throws Exception {
         CustomerProfile customer = new CustomerProfile();
         customer.setId(2L);
@@ -143,13 +244,21 @@ class AppointmentControllerTest {
         Mockito.when(businessMembershipService.userHasAccessToBusiness(9L, 1L, 5L)).thenReturn(false);
         Mockito.when(customerProfileRepository.findByUserIdAndTenantId(9L, 5L)).thenReturn(Optional.of(customer));
         Mockito.when(businessCustomerRepository.findByTenantIdAndBusinessId(5L, 1L)).thenReturn(List.of(businessCustomer));
-        BusinessUser businessUser = new BusinessUser();
-        businessUser.setTenantId(5L);
-        businessUser.setBusinessId(1L);
-        businessUser.setUserId(44L);
-        businessUser.setStatus("ACTIVE");
+        AppointmentStaff staff = new AppointmentStaff();
+        staff.setId(44L);
+        staff.setTenantId(5L);
+        staff.setBusinessId(1L);
+        staff.setName("Alex Staff");
+        staff.setStatus("ACTIVE");
+        Mockito.when(appointmentStaffRepository.findByTenantIdAndBusinessIdAndStatusIgnoreCaseOrderByNameAsc(5L, 1L, "ACTIVE"))
+            .thenReturn(List.of(staff));
+        BusinessUser linkedBusinessUser = new BusinessUser();
+        linkedBusinessUser.setTenantId(5L);
+        linkedBusinessUser.setBusinessId(1L);
+        linkedBusinessUser.setUserId(44L);
+        linkedBusinessUser.setStatus("ACTIVE");
         Mockito.when(businessUserRepository.findByTenantIdAndBusinessIdAndStatusIgnoreCase(5L, 1L, "ACTIVE"))
-            .thenReturn(List.of(businessUser));
+            .thenReturn(List.of(linkedBusinessUser));
         Mockito.when(appointmentRepository.save(Mockito.any(Appointment.class)))
             .thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -168,7 +277,7 @@ class AppointmentControllerTest {
             .andExpect(jsonPath("$.serviceName").value("Hair consultation"))
             .andExpect(jsonPath("$.servicePrice").value(450.0))
             .andExpect(jsonPath("$.durationMinutes").value(45))
-            .andExpect(jsonPath("$.staffUserId").value(44));
+            .andExpect(jsonPath("$.staffId").value(44));
 
         Mockito.verify(notificationService).create(
             5L, 44L, "APPOINTMENT_BOOKED", "New appointment",
@@ -194,22 +303,32 @@ class AppointmentControllerTest {
         appointmentService.setBusinessId(1L);
         appointmentService.setDurationMinutes(30);
         appointmentService.setEnabled(true);
-        BusinessUser busyStaff = new BusinessUser();
-        busyStaff.setUserId(44L);
-        BusinessUser availableStaff = new BusinessUser();
-        availableStaff.setUserId(45L);
+        AppointmentStaff busyStaff = new AppointmentStaff();
+        busyStaff.setId(44L);
+        busyStaff.setTenantId(5L);
+        busyStaff.setBusinessId(1L);
+        busyStaff.setName("Busy Staff");
+        busyStaff.setEmail("private@example.com");
+        busyStaff.setPhone("555-0103");
+        busyStaff.setStatus("ACTIVE");
+        AppointmentStaff availableStaff = new AppointmentStaff();
+        availableStaff.setId(45L);
+        availableStaff.setTenantId(5L);
+        availableStaff.setBusinessId(1L);
+        availableStaff.setName("Available Staff");
+        availableStaff.setStatus("ACTIVE");
         Appointment bookedAppointment = new Appointment();
         bookedAppointment.setScheduledAt(date.atTime(10, 0));
         bookedAppointment.setDurationMinutes(30);
         bookedAppointment.setStatus(AppointmentStatus.BOOKED);
-        bookedAppointment.setStaffUserId(44L);
+        bookedAppointment.setStaffId(44L);
 
         Mockito.when(businessRepository.findById(1L)).thenReturn(Optional.of(business));
         Mockito.when(appointmentServiceRepository.findById(77L)).thenReturn(Optional.of(appointmentService));
         Mockito.when(businessMembershipService.userHasAccessToBusiness(9L, 1L, 5L)).thenReturn(false);
         Mockito.when(customerProfileRepository.findByUserIdAndTenantId(9L, 5L)).thenReturn(Optional.of(customer));
         Mockito.when(businessCustomerRepository.findByTenantIdAndBusinessId(5L, 1L)).thenReturn(List.of(businessCustomer));
-        Mockito.when(businessUserRepository.findByTenantIdAndBusinessIdAndStatusIgnoreCase(5L, 1L, "ACTIVE"))
+        Mockito.when(appointmentStaffRepository.findByTenantIdAndBusinessIdAndStatusIgnoreCaseOrderByNameAsc(5L, 1L, "ACTIVE"))
             .thenReturn(List.of(busyStaff, availableStaff));
         Mockito.when(appointmentRepository.findByBusinessIdAndScheduledAtBetween(
             Mockito.eq(1L), Mockito.any(LocalDateTime.class), Mockito.any(LocalDateTime.class)
@@ -220,13 +339,16 @@ class AppointmentControllerTest {
                 .param("serviceId", "77")
                 .param("date", date.toString()))
             .andExpect(status().isOk())
+            .andExpect(jsonPath("$.staff[0].email").doesNotExist())
+            .andExpect(jsonPath("$.staff[0].phone").doesNotExist())
+            .andExpect(jsonPath("$.staff[0].userId").doesNotExist())
             .andExpect(jsonPath("$.availableSlots", org.hamcrest.Matchers.hasItem("2030-06-15T10:00")));
 
         mockMvc.perform(get("/api/v1/appointments/availability")
                 .param("businessId", "1")
                 .param("serviceId", "77")
                 .param("date", date.toString())
-                .param("staffUserId", "44"))
+                .param("staffId", "44"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.availableSlots", org.hamcrest.Matchers.not(
                 org.hamcrest.Matchers.hasItem("2030-06-15T10:00"))));

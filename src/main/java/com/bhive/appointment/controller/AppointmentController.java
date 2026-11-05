@@ -6,9 +6,12 @@ import com.bhive.appointment.entity.AppointmentStatus;
 import com.bhive.appointment.dto.AppointmentStatusUpdateRequest;
 import com.bhive.appointment.dto.AppointmentAvailabilityResponse;
 import com.bhive.appointment.dto.AppointmentStaffOption;
+import com.bhive.appointment.dto.AppointmentStaffView;
 import com.bhive.appointment.repository.AppointmentRepository;
 import com.bhive.appointment.repository.AppointmentServiceRepository;
+import com.bhive.appointment.repository.AppointmentStaffRepository;
 import com.bhive.appointment.service.AppointmentBillingService;
+import com.bhive.appointment.entity.AppointmentStaff;
 import com.bhive.billing.entity.Invoice;
 import com.bhive.business.entity.Business;
 import com.bhive.business.entity.BusinessUser;
@@ -30,8 +33,13 @@ import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -42,14 +50,18 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.transaction.annotation.Transactional;
 
 @RestController
 @RequestMapping("/api/v1")
 public class AppointmentController {
 
+    public record AppointmentStaffRequest(String name, String email, String phone) {}
+
     private final AppointmentRepository appointmentRepository;
     private final AppointmentServiceRepository appointmentServiceRepository;
+    private final AppointmentStaffRepository appointmentStaffRepository;
     private final BusinessMembershipService businessMembershipService;
     private final BusinessRepository businessRepository;
     private final CustomerProfileRepository customerProfileRepository;
@@ -61,6 +73,7 @@ public class AppointmentController {
 
     public AppointmentController(AppointmentRepository appointmentRepository,
                                  AppointmentServiceRepository appointmentServiceRepository,
+                                 AppointmentStaffRepository appointmentStaffRepository,
                                  BusinessMembershipService businessMembershipService,
                                  BusinessRepository businessRepository,
                                  CustomerProfileRepository customerProfileRepository,
@@ -71,6 +84,7 @@ public class AppointmentController {
                                  AppointmentBillingService appointmentBillingService) {
         this.appointmentRepository = appointmentRepository;
         this.appointmentServiceRepository = appointmentServiceRepository;
+        this.appointmentStaffRepository = appointmentStaffRepository;
         this.businessMembershipService = businessMembershipService;
         this.businessRepository = businessRepository;
         this.customerProfileRepository = customerProfileRepository;
@@ -97,7 +111,7 @@ public class AppointmentController {
             .filter(appointment -> canManageBusiness(userId, tenantId, appointment.getBusinessId())
                 || (customerId != null && customerId.equals(appointment.getCustomerId())))
             .toList();
-        return ResponseEntity.ok(appointments);
+        return ResponseEntity.ok(attachStaffNames(appointments, tenantId));
     }
 
     @GetMapping("/appointments/{id}")
@@ -109,6 +123,7 @@ public class AppointmentController {
         }
         return appointmentRepository.findById(id)
             .filter(appointment -> canAccessAppointment(appointment, userId, tenantId))
+            .map(this::attachStaffName)
             .map(ResponseEntity::ok)
             .orElse(ResponseEntity.status(HttpStatus.FORBIDDEN).build());
     }
@@ -117,6 +132,7 @@ public class AppointmentController {
     public ResponseEntity<AppointmentAvailabilityResponse> getAvailability(@RequestParam Long businessId,
                                                                             @RequestParam Long serviceId,
                                                                             @RequestParam LocalDate date,
+                                                                            @RequestParam(required = false) Long staffId,
                                                                             @RequestParam(required = false) Long staffUserId) {
         Long tenantId = TenantContext.getTenantId();
         Long userId = TenantContext.getUserId();
@@ -135,14 +151,16 @@ public class AppointmentController {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
         }
 
-        List<AppointmentStaffOption> staff = businessUserRepository
-            .findByTenantIdAndBusinessIdAndStatusIgnoreCase(tenantId, businessId, "ACTIVE").stream()
-            .filter(member -> member.getUserId() != null)
-            .map(member -> new AppointmentStaffOption(member.getUserId(), "Staff " + member.getUserId()))
-            .toList();
-        if (staffUserId != null && staff.stream().noneMatch(option -> staffUserId.equals(option.userId()))) {
+        List<AppointmentStaff> staffMembers = activeAppointmentStaff(tenantId, businessId);
+        Optional<AppointmentStaff> selectedStaff = staffId != null
+            ? staffMembers.stream().filter(member -> staffId.equals(member.getId())).findFirst()
+            : staffUserId == null
+                ? Optional.empty()
+                : staffMembers.stream().filter(member -> staffUserId.equals(member.getLinkedUserId())).findFirst();
+        if ((staffId != null || staffUserId != null) && selectedStaff.isEmpty()) {
             return ResponseEntity.badRequest().build();
         }
+        List<AppointmentStaffOption> staff = staffMembers.stream().map(this::toStaffOption).toList();
 
         LocalDateTime dayStart = date.atStartOfDay();
         LocalDateTime dayEnd = date.plusDays(1).atStartOfDay();
@@ -156,42 +174,95 @@ public class AppointmentController {
         for (LocalTime start = opensAt; !start.plusMinutes(duration).isAfter(closesAt); start = start.plusMinutes(30)) {
             LocalDateTime slotStart = date.atTime(start);
             LocalDateTime slotEnd = slotStart.plusMinutes(duration);
-            boolean occupied = staffUserId != null
-                ? hasResourceConflict(booked, slotStart, slotEnd, staffUserId)
-                : staff.isEmpty()
+            boolean occupied = selectedStaff.isPresent()
+                ? hasResourceConflict(booked, slotStart, slotEnd, selectedStaff.get())
+                : staffMembers.isEmpty()
                     ? hasResourceConflict(booked, slotStart, slotEnd, null)
-                    : staff.stream().allMatch(option -> hasResourceConflict(booked, slotStart, slotEnd, option.userId()));
+                    : staffMembers.stream().allMatch(member -> hasResourceConflict(booked, slotStart, slotEnd, member));
             if (!occupied && slotStart.isAfter(LocalDateTime.now())) slots.add(slotStart.toString());
         }
         return ResponseEntity.ok(new AppointmentAvailabilityResponse(date, slots, staff));
     }
 
-    private boolean hasResourceConflict(List<Appointment> booked, LocalDateTime slotStart, LocalDateTime slotEnd, Long staffUserId) {
+    private boolean hasResourceConflict(
+        List<Appointment> booked,
+        LocalDateTime slotStart,
+        LocalDateTime slotEnd,
+        AppointmentStaff staff
+    ) {
         return booked.stream().anyMatch(appointment -> {
             LocalDateTime appointmentEnd = appointment.getScheduledAt().plusMinutes(appointment.getDurationMinutes());
             boolean overlaps = appointment.getScheduledAt().isBefore(slotEnd) && appointmentEnd.isAfter(slotStart);
-            return overlaps && (staffUserId == null || appointment.getStaffUserId() == null
-                || staffUserId.equals(appointment.getStaffUserId()));
+            if (!overlaps) return false;
+            if (staff == null) return true;
+            if (appointment.getStaffId() != null) return staff.getId().equals(appointment.getStaffId());
+            return appointment.getStaffUserId() == null
+                || staff.getLinkedUserId() != null && staff.getLinkedUserId().equals(appointment.getStaffUserId());
         });
     }
 
     @GetMapping("/businesses/{businessId}/appointment-staff")
-    public ResponseEntity<List<AppointmentStaffOption>> getBusinessAppointmentStaff(@PathVariable Long businessId) {
+    public ResponseEntity<List<AppointmentStaffView>> getBusinessAppointmentStaff(@PathVariable Long businessId) {
         Long tenantId = TenantContext.getTenantId();
         Long userId = TenantContext.getUserId();
         if (tenantId == null || userId == null || !canManageBusiness(userId, tenantId, businessId)) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
         }
-        List<AppointmentStaffOption> staff = businessUserRepository
-            .findByTenantIdAndBusinessIdAndStatusIgnoreCase(tenantId, businessId, "ACTIVE").stream()
-            .filter(member -> member.getUserId() != null)
-            .map(member -> new AppointmentStaffOption(member.getUserId(), "Staff " + member.getUserId()))
-            .toList();
-        return ResponseEntity.ok(staff);
+        return ResponseEntity.ok(activeAppointmentStaff(tenantId, businessId).stream().map(this::toStaffView).toList());
+    }
+
+    @PostMapping("/businesses/{businessId}/appointment-staff")
+    public ResponseEntity<AppointmentStaffView> addBusinessAppointmentStaff(
+        @PathVariable Long businessId,
+        @RequestBody(required = false) AppointmentStaffRequest request
+    ) {
+        Long tenantId = TenantContext.getTenantId();
+        Long userId = TenantContext.getUserId();
+        if (tenantId == null || userId == null || !canManageBusiness(userId, tenantId, businessId)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
+
+        String name = request == null || request.name() == null ? "" : request.name().trim();
+        String email = cleanEmail(request == null ? null : request.email());
+        String phone = cleanPhone(request == null ? null : request.phone());
+        if (name.isEmpty() || name.length() > 160) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Enter a staff name up to 160 characters.");
+        }
+        if (email == null && phone == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Enter an email or phone number for the staff member.");
+        }
+        if (email != null && email.length() > 255) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Email must be 255 characters or fewer.");
+        }
+        if (email != null && !email.matches("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$")) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Enter a valid email address.");
+        }
+        if (phone != null && phone.length() > 30) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Phone number must be 30 characters or fewer.");
+        }
+
+        synchronizeLegacyBusinessStaff(tenantId, businessId);
+        boolean duplicate = appointmentStaffRepository.findByTenantIdAndBusinessIdAndStatusIgnoreCaseOrderByNameAsc(
+                tenantId, businessId, "ACTIVE").stream()
+            .anyMatch(member -> email != null && email.equalsIgnoreCase(member.getEmail())
+                || phone != null && normalizedPhone(phone).equals(normalizedPhone(member.getPhone())));
+        if (duplicate) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "A staff member with this email or phone is already added.");
+        }
+
+        AppointmentStaff staff = new AppointmentStaff();
+        staff.setTenantId(tenantId);
+        staff.setBusinessId(businessId);
+        staff.setName(name);
+        staff.setEmail(email);
+        staff.setPhone(phone);
+        staff.setStatus("ACTIVE");
+        return ResponseEntity.status(HttpStatus.CREATED).body(toStaffView(appointmentStaffRepository.save(staff)));
     }
 
     @PutMapping("/appointments/{id}/staff")
     public ResponseEntity<Appointment> updateAppointmentStaff(@PathVariable Long id,
+                                                               @RequestParam(required = false) Long staffId,
                                                                @RequestParam(required = false) Long staffUserId) {
         Long tenantId = TenantContext.getTenantId();
         Long userId = TenantContext.getUserId();
@@ -205,12 +276,16 @@ public class AppointmentController {
         if (appointment.getStatus() != AppointmentStatus.BOOKED && appointment.getStatus() != AppointmentStatus.CONFIRMED) {
             return ResponseEntity.badRequest().build();
         }
-        if (staffUserId != null && businessUserRepository
-            .findByTenantIdAndBusinessIdAndStatusIgnoreCase(tenantId, appointment.getBusinessId(), "ACTIVE").stream()
-            .noneMatch(member -> staffUserId.equals(member.getUserId()))) {
+        List<AppointmentStaff> activeStaff = activeAppointmentStaff(tenantId, appointment.getBusinessId());
+        Optional<AppointmentStaff> selectedStaff = staffId != null
+            ? activeStaff.stream().filter(staff -> staffId.equals(staff.getId())).findFirst()
+            : staffUserId == null
+                ? Optional.empty()
+                : activeStaff.stream().filter(staff -> staffUserId.equals(staff.getLinkedUserId())).findFirst();
+        if ((staffId != null || staffUserId != null) && selectedStaff.isEmpty()) {
             return ResponseEntity.badRequest().build();
         }
-        if (staffUserId != null) {
+        if (selectedStaff.isPresent()) {
             LocalDateTime appointmentEnd = appointment.getScheduledAt().plusMinutes(appointment.getDurationMinutes());
             boolean conflict = appointmentRepository.findByBusinessIdAndScheduledAtBetween(
                     appointment.getBusinessId(), appointment.getScheduledAt().toLocalDate().atStartOfDay(),
@@ -220,11 +295,16 @@ public class AppointmentController {
                 .anyMatch(existing -> {
                     LocalDateTime existingEnd = existing.getScheduledAt().plusMinutes(existing.getDurationMinutes());
                     return existing.getScheduledAt().isBefore(appointmentEnd) && existingEnd.isAfter(appointment.getScheduledAt())
-                        && (existing.getStaffUserId() == null || staffUserId.equals(existing.getStaffUserId()));
+                        && (existing.getStaffId() == null && existing.getStaffUserId() == null
+                            || selectedStaff.get().getId().equals(existing.getStaffId())
+                            || existing.getStaffId() == null && selectedStaff.get().getLinkedUserId() != null
+                                && selectedStaff.get().getLinkedUserId().equals(existing.getStaffUserId()));
                 });
             if (conflict) return ResponseEntity.status(HttpStatus.CONFLICT).build();
         }
-        appointment.setStaffUserId(staffUserId);
+        appointment.setStaffId(selectedStaff.map(AppointmentStaff::getId).orElse(null));
+        appointment.setStaffUserId(selectedStaff.map(AppointmentStaff::getLinkedUserId).orElse(null));
+        appointment.setStaffName(selectedStaff.map(AppointmentStaff::getName).orElse(null));
         return ResponseEntity.ok(appointmentRepository.save(appointment));
     }
 
@@ -283,26 +363,29 @@ public class AppointmentController {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
         }
 
-        List<BusinessUser> activeStaff = businessUserRepository
-            .findByTenantIdAndBusinessIdAndStatusIgnoreCase(tenantId, request.getBusinessId(), "ACTIVE").stream()
-            .filter(member -> member.getUserId() != null)
-            .toList();
-        Long requestedStaffId = request.getStaffUserId();
-        if (requestedStaffId != null && activeStaff.stream().noneMatch(member -> requestedStaffId.equals(member.getUserId()))) {
+        List<AppointmentStaff> activeStaff = activeAppointmentStaff(tenantId, request.getBusinessId());
+        Long requestedStaffId = request.getStaffId();
+        Long legacyRequestedStaffUserId = requestedStaffId == null ? request.getStaffUserId() : null;
+        Optional<AppointmentStaff> requestedStaff = requestedStaffId != null
+            ? activeStaff.stream().filter(member -> requestedStaffId.equals(member.getId())).findFirst()
+            : legacyRequestedStaffUserId == null
+                ? Optional.empty()
+                : activeStaff.stream().filter(member -> legacyRequestedStaffUserId.equals(member.getLinkedUserId())).findFirst();
+        if ((requestedStaffId != null || legacyRequestedStaffUserId != null) && requestedStaff.isEmpty()) {
             return ResponseEntity.badRequest().build();
         }
-        Long assignedStaffId = requestedStaffId;
+        AppointmentStaff assignedStaff = requestedStaff.orElse(null);
 
         LocalDateTime scheduledEnd = scheduledAt.plusMinutes(selectedService.get().getDurationMinutes());
         List<Appointment> sameDayBookings = appointmentRepository.findByBusinessIdAndScheduledAtBetween(
                 request.getBusinessId(), scheduledAt.toLocalDate().atStartOfDay(), scheduledAt.toLocalDate().plusDays(1).atStartOfDay())
             .stream().filter(existing -> existing.getStatus() == AppointmentStatus.BOOKED || existing.getStatus() == AppointmentStatus.CONFIRMED).toList();
-        if (assignedStaffId == null && !activeStaff.isEmpty()) {
-            assignedStaffId = activeStaff.stream().map(BusinessUser::getUserId)
-                .filter(staffId -> !hasResourceConflict(sameDayBookings, scheduledAt, scheduledEnd, staffId))
+        if (assignedStaff == null && !activeStaff.isEmpty()) {
+            assignedStaff = activeStaff.stream()
+                .filter(staff -> !hasResourceConflict(sameDayBookings, scheduledAt, scheduledEnd, staff))
                 .findFirst().orElse(null);
-            if (assignedStaffId == null) return ResponseEntity.status(HttpStatus.CONFLICT).build();
-        } else if (hasResourceConflict(sameDayBookings, scheduledAt, scheduledEnd, assignedStaffId)) {
+            if (assignedStaff == null) return ResponseEntity.status(HttpStatus.CONFLICT).build();
+        } else if (hasResourceConflict(sameDayBookings, scheduledAt, scheduledEnd, assignedStaff)) {
             return ResponseEntity.status(HttpStatus.CONFLICT).build();
         }
 
@@ -310,7 +393,9 @@ public class AppointmentController {
         appointment.setBusinessId(request.getBusinessId());
         appointment.setCustomerId(appointmentCustomer.get().getId());
         appointment.setAppointmentServiceId(selectedService.get().getId());
-        appointment.setStaffUserId(assignedStaffId);
+        appointment.setStaffId(assignedStaff == null ? null : assignedStaff.getId());
+        appointment.setStaffUserId(assignedStaff == null ? null : assignedStaff.getLinkedUserId());
+        appointment.setStaffName(assignedStaff == null ? null : assignedStaff.getName());
         appointment.setServiceName(selectedService.get().getName());
         appointment.setServicePrice(selectedService.get().getPrice());
         appointment.setLoyaltyPointsRedeemed(0);
@@ -386,6 +471,7 @@ public class AppointmentController {
             return ResponseEntity.badRequest().build();
         }
         AppointmentStatus previousStatus = appointment.getStatus();
+        attachStaffName(appointment);
         appointment.setStatus(requestedStatus);
         if (businessUser && (requestedStatus == AppointmentStatus.CONFIRMED || requestedStatus == AppointmentStatus.CANCELLED)) {
             String trimmedNote = businessNote == null ? null : businessNote.trim();
@@ -466,6 +552,93 @@ public class AppointmentController {
 
     private boolean canManageBusiness(Long userId, Long tenantId, Long businessId) {
         return businessMembershipService.userHasAccessToBusiness(userId, businessId, tenantId);
+    }
+
+    private List<AppointmentStaffOption> appointmentStaffOptions(Long tenantId, Long businessId) {
+        return activeAppointmentStaff(tenantId, businessId).stream().map(this::toStaffOption).toList();
+    }
+
+    private List<AppointmentStaff> activeAppointmentStaff(Long tenantId, Long businessId) {
+        synchronizeLegacyBusinessStaff(tenantId, businessId);
+        return appointmentStaffRepository.findByTenantIdAndBusinessIdAndStatusIgnoreCaseOrderByNameAsc(
+            tenantId, businessId, "ACTIVE");
+    }
+
+    private void synchronizeLegacyBusinessStaff(Long tenantId, Long businessId) {
+        businessUserRepository.findByBusinessId(businessId).stream()
+            .filter(member -> tenantId.equals(member.getTenantId()) && member.getUserId() != null)
+            .forEach(member -> {
+                if (appointmentStaffRepository.findByTenantIdAndBusinessIdAndLinkedUserId(
+                    tenantId, businessId, member.getUserId()).isPresent()) {
+                    return;
+                }
+                CustomerProfile profile = customerProfileRepository
+                    .findByUserIdAndTenantId(member.getUserId(), tenantId)
+                    .orElse(null);
+                AppointmentStaff staff = new AppointmentStaff();
+                staff.setTenantId(tenantId);
+                staff.setBusinessId(businessId);
+                staff.setName(profile == null || profile.getName() == null || profile.getName().isBlank()
+                    ? "Staff " + member.getUserId()
+                    : profile.getName());
+                staff.setEmail(profile == null ? null : cleanEmail(profile.getEmail()));
+                staff.setPhone(profile == null ? null : cleanPhone(profile.getPhone()));
+                staff.setLinkedUserId(member.getUserId());
+                staff.setStatus(member.getStatus() == null ? "ACTIVE" : member.getStatus());
+                appointmentStaffRepository.save(staff);
+            });
+    }
+
+    private AppointmentStaffOption toStaffOption(AppointmentStaff staff) {
+        return new AppointmentStaffOption(staff.getId(), staff.getName(), staff.getLinkedUserId());
+    }
+
+    private Appointment attachStaffName(Appointment appointment) {
+        Long tenantId = TenantContext.getTenantId();
+        if (tenantId != null) attachStaffNames(List.of(appointment), tenantId);
+        return appointment;
+    }
+
+    private List<Appointment> attachStaffNames(List<Appointment> appointments, Long tenantId) {
+        Map<Long, List<AppointmentStaff>> staffByBusiness = new HashMap<>();
+        Set<Long> synchronizedBusinesses = new HashSet<>();
+        for (Appointment appointment : appointments) {
+            Long businessId = appointment.getBusinessId();
+            if (businessId == null || appointment.getStaffId() == null && appointment.getStaffUserId() == null) {
+                continue;
+            }
+            if (appointment.getStaffId() == null && synchronizedBusinesses.add(businessId)) {
+                synchronizeLegacyBusinessStaff(tenantId, businessId);
+            }
+            List<AppointmentStaff> businessStaff = staffByBusiness.computeIfAbsent(
+                businessId, id -> appointmentStaffRepository.findByTenantIdAndBusinessId(tenantId, id));
+            businessStaff.stream()
+                .filter(staff -> appointment.getStaffId() != null
+                    ? appointment.getStaffId().equals(staff.getId())
+                    : appointment.getStaffUserId().equals(staff.getLinkedUserId()))
+                .findFirst()
+                .ifPresent(staff -> appointment.setStaffName(staff.getName()));
+        }
+        return appointments;
+    }
+
+    private AppointmentStaffView toStaffView(AppointmentStaff staff) {
+        return new AppointmentStaffView(staff.getId(), staff.getName(), staff.getEmail(), staff.getPhone(),
+            staff.getLinkedUserId());
+    }
+
+    private String cleanEmail(String email) {
+        if (email == null || email.isBlank()) return null;
+        return email.trim().toLowerCase(Locale.ROOT);
+    }
+
+    private String cleanPhone(String phone) {
+        if (phone == null || phone.isBlank()) return null;
+        return phone.trim();
+    }
+
+    private String normalizedPhone(String phone) {
+        return phone == null ? null : phone.replaceAll("[\\s()-]", "");
     }
 
     private boolean isCustomerLinkedToBusiness(Long tenantId, Long businessId, Long customerId) {

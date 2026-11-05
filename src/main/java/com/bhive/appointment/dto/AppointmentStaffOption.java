@@ -1,4 +1,7 @@
 package com.bhive.appointment.dto;
 
-public record AppointmentStaffOption(Long userId, String label) {
+import com.fasterxml.jackson.annotation.JsonInclude;
+
+@JsonInclude(JsonInclude.Include.NON_NULL)
+public record AppointmentStaffOption(Long staffId, String label, Long userId) {
 }

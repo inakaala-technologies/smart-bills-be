@@ -15,6 +15,7 @@ import com.bhive.notification.service.NotificationService;
 import com.bhive.loyalty.service.LoyaltyService;
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.AfterEach;
@@ -103,6 +104,7 @@ class InvoiceControllerTest {
 		invoice.setInvoiceNumber("INV-3001");
 		invoice.setIssueDate(LocalDate.now());
 		invoice.setDueDate(LocalDate.now().plusDays(7));
+		invoice.setCreatedAt(LocalDateTime.of(2026, 11, 5, 12, 30));
 		invoice.setTotalAmount(new BigDecimal("4500.00"));
 		invoice.setStatus(InvoiceStatus.SENT);
 
@@ -110,7 +112,9 @@ class InvoiceControllerTest {
 		Mockito.when(customerProfileRepository.findAll()).thenReturn(List.of(customerProfile));
 
 		mockMvc.perform(get("/api/v1/billing/invoices").accept(MediaType.APPLICATION_JSON)).andExpect(status().isOk())
-				.andExpect(jsonPath("$", hasSize(1))).andExpect(jsonPath("$[0].invoiceNumber").value("INV-3001"));
+				.andExpect(jsonPath("$", hasSize(1)))
+				.andExpect(jsonPath("$[0].invoiceNumber").value("INV-3001"))
+				.andExpect(jsonPath("$[0].createdAt").value("2026-11-05T12:30Z"));
 	}
 
 	@Test
@@ -145,10 +149,13 @@ class InvoiceControllerTest {
 		mockMvc.perform(post("/api/v1/billing/invoices").contentType(MediaType.APPLICATION_JSON)
 				.content("{\"businessId\":1,\"customerId\":2,\"invoiceNumber\":\"INV-2001\",\"issueDate\":\""
 						+ LocalDate.now() + "\",\"dueDate\":\"" + LocalDate.now().plusDays(7)
-						+ "\",\"subtotal\":1000.00,\"gstAmount\":180.00,\"totalAmount\":1180.00,\"status\":\"SENT\"}"))
+						+ "\",\"subtotal\":1000.00,\"gstAmount\":180.00,\"totalAmount\":1180.00,\"status\":\"SENT\","
+						+ "\"items\":[{\"productName\":\"Consultation\",\"quantity\":1,\"unitPrice\":1000.00,\"gstRate\":18.00}]}"))
 				.andExpect(status().isOk()).andExpect(jsonPath("$.status").value("SENT"))
 				.andExpect(jsonPath("$.invoiceNumber", org.hamcrest.Matchers.startsWith("INV-")))
-				.andExpect(jsonPath("$.issueDate").value(LocalDate.now().toString()));
+				.andExpect(jsonPath("$.issueDate").value(LocalDate.now().toString()))
+				.andExpect(jsonPath("$.items[0].productName").value("Consultation"))
+				.andExpect(jsonPath("$.items[0].quantity").value(1));
 
 		ArgumentCaptor<BusinessCustomer> captor = ArgumentCaptor.forClass(BusinessCustomer.class);
 		verify(businessCustomerRepository, times(1)).save(captor.capture());

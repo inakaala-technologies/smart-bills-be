@@ -2,6 +2,7 @@ package com.bhive.appointment.service;
 
 import com.bhive.appointment.entity.Appointment;
 import com.bhive.billing.entity.Invoice;
+import com.bhive.billing.entity.InvoiceLineItem;
 import com.bhive.billing.entity.InvoiceStatus;
 import com.bhive.billing.repository.InvoiceRepository;
 import com.bhive.customer.entity.CustomerProfile;
@@ -60,6 +61,22 @@ public class AppointmentBillingService {
         invoice.setSubtotal(subtotal);
         invoice.setGstAmount(BigDecimal.ZERO);
         invoice.setTotalAmount(subtotal.subtract(loyaltyDiscount));
+        invoice.addLineItem(new InvoiceLineItem(
+            appointment.getServiceName() == null || appointment.getServiceName().isBlank()
+                ? "Appointment service"
+                : appointment.getServiceName(),
+            BigDecimal.ONE,
+            servicePrice,
+            BigDecimal.ZERO
+        ));
+        if (visitingCharge.signum() > 0) {
+            invoice.addLineItem(new InvoiceLineItem(
+                "Visiting charge",
+                BigDecimal.ONE,
+                visitingCharge,
+                BigDecimal.ZERO
+            ));
+        }
         invoice.setLoyaltyPointsRedeemed(appointment.getLoyaltyPointsRedeemed() == null
             ? 0
             : appointment.getLoyaltyPointsRedeemed());
