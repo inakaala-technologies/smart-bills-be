@@ -10,6 +10,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClientResponseException;
 
@@ -78,6 +80,7 @@ public class AutomaticBillFetchScheduler {
                     INPUT_MAP_TYPE
             );
             ProviderFetchResponse response = integrationService.fetchScheduledBill(
+                    claim,
                     claim.providerCode(),
                     inputs,
                     consent.get()
@@ -90,6 +93,11 @@ public class AutomaticBillFetchScheduler {
                     claim.providerCode(),
                     exception.getClass().getSimpleName()
             );
+            if (exception instanceof ResponseStatusException responseStatusException
+                    && responseStatusException.getStatusCode() == HttpStatus.SERVICE_UNAVAILABLE) {
+                savedBillService.deferScheduledFetch(claim, properties.getIntervalHours());
+                return;
+            }
             fail(claim, failureCode(exception), isTemporary(exception));
         }
     }

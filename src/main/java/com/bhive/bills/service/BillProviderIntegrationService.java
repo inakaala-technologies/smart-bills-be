@@ -40,17 +40,23 @@ public class BillProviderIntegrationService {
     private final ProviderInputFieldRepository inputFieldRepository;
     private final BillProviderRepository providerRepository;
     private final SavedBillService savedBillService;
+    private final CustomerBillConsentService customerBillConsentService;
+    private final ApiSetuConsentArtifactValidator consentArtifactValidator;
 
     public BillProviderIntegrationService(
             BillProviderAdapterRegistry adapterRegistry,
             ProviderInputFieldRepository inputFieldRepository,
             BillProviderRepository providerRepository,
-            SavedBillService savedBillService) {
+            SavedBillService savedBillService,
+            CustomerBillConsentService customerBillConsentService,
+            ApiSetuConsentArtifactValidator consentArtifactValidator) {
 
         this.adapterRegistry = adapterRegistry;
         this.inputFieldRepository = inputFieldRepository;
         this.providerRepository = providerRepository;
         this.savedBillService = savedBillService;
+        this.customerBillConsentService = customerBillConsentService;
+        this.consentArtifactValidator = consentArtifactValidator;
     }
 
     public ProviderFetchResponse fetchBill(BillProviderRequest request) {
@@ -73,10 +79,6 @@ public class BillProviderIntegrationService {
                         "Provider not found or inactive: " + providerCode
                 ));
 
-        // Find the appropriate provider adapter
-        BillProviderAdapter adapter =
-                adapterRegistry.getAdapter(providerCode);
-
         // Validate user-provided fields
         validateProviderInputs(
                 providerCode,
@@ -91,13 +93,27 @@ public class BillProviderIntegrationService {
             );
         }
 
-        savedBillService.prepareFetchAttempt(providerCode, request.providerInputs());
+        Long customerId = savedBillService.requireAuthenticatedCustomerId();
+        JsonNode verifiedConsentArtifact = requireVerifiedArtifact(
+                customerId,
+                providerCode,
+                request.consentArtifact()
+        );
+        BillProviderAdapter adapter = adapterRegistry.getAdapter(providerCode);
+
+        customerBillConsentService.authorizeAndPrepareManualFetch(
+                request.applicationConsentRecordId(),
+                customerId,
+                providerCode,
+                request.providerInputs().keySet().stream().sorted().toList(),
+                request.providerInputs()
+        );
 
         try {
             ProviderFetchResponse response = adapter.fetchBill(
                     providerCode,
                     request.providerInputs(),
-                    request.consentArtifact()
+                    verifiedConsentArtifact
             );
             savedBillService.saveFetchedBill(providerCode, request.providerInputs(), response);
             return response;
@@ -121,6 +137,7 @@ public class BillProviderIntegrationService {
     }
 
     public ProviderFetchResponse fetchScheduledBill(
+            ScheduledBillFetch claim,
             String providerCode,
             Map<String, String> providerInputs,
             JsonNode consentArtifact
@@ -138,8 +155,38 @@ public class BillProviderIntegrationService {
             );
         }
         validateProviderInputs(providerCode, providerInputs);
+        JsonNode verifiedConsentArtifact = requireVerifiedArtifact(
+                claim.customerId(),
+                providerCode,
+                consentArtifact
+        );
         return adapterRegistry.getAdapter(providerCode)
-                .fetchBill(providerCode, providerInputs, consentArtifact);
+                .fetchBill(providerCode, providerInputs, verifiedConsentArtifact);
+    }
+
+    private JsonNode requireVerifiedArtifact(
+            Long customerId,
+            String providerCode,
+            JsonNode suppliedArtifact
+    ) {
+        if (suppliedArtifact == null || suppliedArtifact.isNull()) {
+            throw new ResponseStatusException(
+                    HttpStatus.SERVICE_UNAVAILABLE,
+                    "A verified API Setu consent artifact is not available."
+            );
+        }
+        JsonNode verifiedArtifact = consentArtifactValidator.requireVerifiedArtifact(
+                customerId,
+                providerCode,
+                suppliedArtifact
+        );
+        if (verifiedArtifact == null || verifiedArtifact.isNull()) {
+            throw new ResponseStatusException(
+                    HttpStatus.SERVICE_UNAVAILABLE,
+                    "A verified API Setu consent artifact is not available."
+            );
+        }
+        return verifiedArtifact;
     }
 
     private String fetchFailureCode(RuntimeException failure) {

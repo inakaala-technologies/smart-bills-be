@@ -39,6 +39,47 @@ The scheduled fetch task polls saved ELECTRICITY, WATER, and ECHALLAN rows in bo
 
 Scheduled API Setu fetches require a valid consent artifact. The current default `ScheduledBillConsentProvider` intentionally returns no artifact, so scheduled rows are marked `CONSENT_UNAVAILABLE` and deferred without making an upstream request until a genuine consent source is integrated. Scheduled ECHALLAN additionally requires the trusted consent provider to affirmatively validate recurring access; that method defaults to false. API Setu sample consent placeholders do not authorize recurring access. Scheduler properties use the `BILL_FETCH_*` environment variables; interval, polling delay, batch size, stale-claim threshold, and retry delays must be positive, the batch and retry-count limits are capped at 100, and the retry maximum must be at least the retry base.
 
+## Application-level customer consent
+
+`customer_bill_consents` stores an audit record that an authenticated customer accepted the server-published InGyro statement for a manual bill/document request. It stores requested provider field names only, never provider input values or an API Setu artifact. Records are retained when revoked. The current statement is version `1`; its SHA-256 hash is computed server-side from `ApplicationConsentStatement.TEXT`.
+
+The consent endpoints are `POST /api/v1/bills/consents`, `GET /api/v1/bills/consents`, and `POST /api/v1/bills/consents/{consentRecordId}/revoke`. They use the authenticated user and tenant context; no customer ID, record UUID, final status, or timestamp is accepted from the client. Application-level acceptance is not API Setu authorization and does not permit automatic retrieval.
+
+Manual fetches require an `applicationConsentRecordId` in addition to the API Setu `consentArtifact`. The application-consent record must be accepted, unused, owned by the authenticated customer, and match the provider, purpose, current statement version, and exact set of submitted provider field names. In one short database transaction the consent is locked, the saved-bill attempt is prepared, and both records are linked. The consent is single-use; a later manual fetch requires a new acceptance. Revoked, mismatched, cross-customer, or previously linked records are rejected before the adapter is invoked. A provider failure does not erase the consent or its saved-bill linkage.
+
+Application acceptance is not API Setu authorization. Both manual and scheduled fetches pass through `ApiSetuConsentArtifactValidator` before adapter selection. The trusted validator must verify authenticity, scope, validity and expiry; recurring-access permission is checked separately by the scheduled consent provider. The configured default rejects all supplied artifacts with 503 because no trusted acquisition/verification mechanism has been confirmed. Scheduled records are deferred, without consuming retries, when artifact validation is unavailable. No artifact reaches a provider adapter until a trusted validator accepts it.
+
+Apply `../database/migrations/2026-11-04-customer-bill-consents.sql` after the existing bill migrations before deploying this application version. It adds `saved_bills.application_consent_id`, a nullable FK to the consent record, so the saved bill identifies the application consent used for its latest manual fetch. Historical consent rows retain their `saved_bill_id` association.
+
+### Consent API examples
+
+Record customer acceptance (`201 Created`):
+
+```http
+POST /api/v1/bills/consents
+Authorization: Bearer <access-token>
+X-Tenant-Id: <authorized-tenant-id>
+Content-Type: application/json
+```
+
+```json
+{
+  "providerCode": "KSEB",
+  "requestedDataFields": ["ConsumerNo"],
+  "purposeCode": "MANUAL_BILL_FETCH",
+  "statementVersion": "1",
+  "accepted": true
+}
+```
+
+The server generates `consentRecordId`, `acceptedAt`, status, and statement hash. The response includes provider metadata, field names, purpose/version, status, timestamps, and optional `savedBillId`; it never includes an API Setu artifact or submitted provider input values.
+
+Retrieve history (`GET /api/v1/bills/consents?providerCode=KSEB&status=ACCEPTED&page=0&size=20`): filters are optional; statuses are `ACCEPTED` or `REVOKED`. Results are scoped to the current customer.
+
+Revoke (`POST /api/v1/bills/consents/{consentRecordId}/revoke`): revocation updates the existing record and retains its acceptance history. A record not owned by the current customer returns 404.
+
+Until a trusted API Setu artifact verifier is configured, `POST /api/v1/bills/fetch` returns 503 before creating/updating a saved-bill fetch attempt, even if an application-consent record is accepted. An application-consent acknowledgement is never used as an API Setu artifact.
+
 ## APIs
 
 All endpoints require the existing bearer-token authentication.
@@ -51,11 +92,12 @@ All endpoints require the existing bearer-token authentication.
 {
   "providerCode": "KSEB",
   "providerInputs": {"ConsumerNo": "1111111111111"},
+  "applicationConsentRecordId": "<consent-record-uuid>",
   "consentArtifact": {"consent": {}, "signature": {}}
 }
 ```
 
-The consent artifact above illustrates the JSON shape only; a real request must use a genuine signed artifact. The response retains the existing JSON/XML/PDF provider response format. A subsequent fetch with the same mapped identity updates that saved bill.
+`applicationConsentRecordId` is the UUID returned by the consent acceptance endpoint and is required for manual fetch. `consentArtifact` must be a genuine artifact accepted by the configured trusted validator; the example illustrates shape only and is not a usable artifact. The response retains the existing JSON/XML/PDF provider response format. A subsequent fetch with the same mapped identity updates that saved bill and requires a new application-consent record.
 
 ### List saved bills
 

@@ -11,6 +11,7 @@ import org.springframework.context.annotation.Configuration;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -30,16 +31,16 @@ class ScheduledBillConsentConfigurationTest {
                     provider
             );
             assertTrue(provider.findValidConsent(null).isEmpty());
+            assertFalse(provider.allowsRecurringAccess(null, null));
         }
     }
 
     @Test
     void uses_a_configured_genuine_provider_instead_of_registering_the_default() {
-        try (AnnotationConfigApplicationContext context =
-                     new AnnotationConfigApplicationContext(
-                             ScheduledBillConsentConfiguration.class,
-                             GenuineConsentConfiguration.class
-                     )) {
+        try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext()) {
+            context.register(GenuineConsentConfiguration.class);
+            context.register(ScheduledBillConsentConfiguration.class);
+            context.refresh();
             assertEquals(1, context.getBeansOfType(ScheduledBillConsentProvider.class).size());
             assertInstanceOf(
                     GenuineTestConsentProvider.class,

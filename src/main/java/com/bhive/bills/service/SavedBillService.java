@@ -107,7 +107,7 @@ public class SavedBillService {
         );
     }
 
-    public void prepareFetchAttempt(
+    public Long prepareFetchAttempt(
             String providerCode,
             Map<String, String> providerInputs
     ) {
@@ -120,12 +120,12 @@ public class SavedBillService {
         String inputData = serialize(providerInputs);
 
         try {
-            persistenceService.prepareFetchAttempt(
+            return persistenceService.prepareFetchAttempt(
                     customerId,
                     normalizedProviderCode,
                     identity,
                     inputData
-            );
+            ).getId();
         } catch (DataIntegrityViolationException exception) {
             if (!persistenceService.identityExists(
                     customerId,
@@ -134,12 +134,12 @@ public class SavedBillService {
             )) {
                 throw exception;
             }
-            persistenceService.prepareFetchAttempt(
+            return persistenceService.prepareFetchAttempt(
                     customerId,
                     normalizedProviderCode,
                     identity,
                     inputData
-            );
+            ).getId();
         }
     }
 

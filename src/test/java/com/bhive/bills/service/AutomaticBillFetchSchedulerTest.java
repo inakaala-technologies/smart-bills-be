@@ -53,6 +53,7 @@ class AutomaticBillFetchSchedulerTest {
         )).thenReturn(List.of(claim));
         when(consentProvider.findValidConsent(claim)).thenReturn(Optional.of(consent));
         when(integrationService.fetchScheduledBill(
+                claim,
                 "KSEB",
                 java.util.Map.of("ConsumerNo", "K-1"),
                 consent
@@ -81,7 +82,32 @@ class AutomaticBillFetchSchedulerTest {
         verify(savedBillService, never()).failScheduledFetch(
                 any(), any(), eq(false), anyLong(), anyLong(), anyInt()
         );
-        verify(integrationService, never()).fetchScheduledBill(any(), any(), any());
+        verify(integrationService, never()).fetchScheduledBill(any(), any(), any(), any());
+    }
+
+    @Test
+    void defers_when_the_default_scheduled_consent_source_is_unavailable() {
+        BillFetchSchedulerProperties properties = new BillFetchSchedulerProperties();
+        AutomaticBillFetchScheduler scheduler = new AutomaticBillFetchScheduler(
+                persistenceService,
+                integrationService,
+                savedBillService,
+                new UnavailableScheduledBillConsentProvider(),
+                properties,
+                new ObjectMapper()
+        );
+        ScheduledBillFetch claim = claim(51L, 70L, 8L);
+        when(persistenceService.claimEligibleFetches(
+                any(), eq(10), eq(15L)
+        )).thenReturn(List.of(claim));
+
+        scheduler.fetchDueBills();
+
+        verify(savedBillService).deferScheduledFetch(claim, 24L);
+        verify(savedBillService, never()).failScheduledFetch(
+                any(), any(), eq(false), anyLong(), anyLong(), anyInt()
+        );
+        verify(integrationService, never()).fetchScheduledBill(any(), any(), any(), any());
     }
 
     @Test
@@ -105,7 +131,7 @@ class AutomaticBillFetchSchedulerTest {
         verify(savedBillService, never()).failScheduledFetch(
                 any(), any(), eq(false), anyLong(), anyLong(), anyInt()
         );
-        verify(integrationService, never()).fetchScheduledBill(any(), any(), any());
+        verify(integrationService, never()).fetchScheduledBill(any(), any(), any(), any());
     }
 
     @Test
@@ -127,6 +153,7 @@ class AutomaticBillFetchSchedulerTest {
         when(consentProvider.findValidConsent(claim)).thenReturn(Optional.of(consent));
         when(consentProvider.allowsRecurringAccess(claim, consent)).thenReturn(true);
         when(integrationService.fetchScheduledBill(
+                claim,
                 "TRANSPORT_ECHALLAN",
                 java.util.Map.of(
                         "REQUEST", "INPUT_REQUEST",
@@ -154,10 +181,12 @@ class AutomaticBillFetchSchedulerTest {
         when(consentProvider.findValidConsent(temporaryClaim)).thenReturn(Optional.of(consent));
         when(consentProvider.findValidConsent(permanentClaim)).thenReturn(Optional.of(consent));
         when(integrationService.fetchScheduledBill(
-                eq("KSEB"), eq(java.util.Map.of("ConsumerNo", "K-1")), eq(consent)
+                eq(temporaryClaim), eq("KSEB"),
+                eq(java.util.Map.of("ConsumerNo", "K-1")), eq(consent)
         )).thenThrow(new ResourceAccessException("timeout"));
         when(integrationService.fetchScheduledBill(
-                eq("KSEB"), eq(java.util.Map.of("ConsumerNo", "K-2")), eq(consent)
+                eq(permanentClaim), eq("KSEB"),
+                eq(java.util.Map.of("ConsumerNo", "K-2")), eq(consent)
         )).thenThrow(new ProviderApiException(HttpStatus.BAD_REQUEST, "KSEB"));
         when(persistenceService.claimEligibleFetches(
                 any(), eq(10), eq(15L)
@@ -205,10 +234,12 @@ class AutomaticBillFetchSchedulerTest {
         when(consentProvider.findValidConsent(failedClaim)).thenReturn(Optional.of(consent));
         when(consentProvider.findValidConsent(successfulClaim)).thenReturn(Optional.of(consent));
         when(integrationService.fetchScheduledBill(
-                eq("KSEB"), eq(java.util.Map.of("ConsumerNo", "K-1")), eq(consent)
+                eq(failedClaim), eq("KSEB"),
+                eq(java.util.Map.of("ConsumerNo", "K-1")), eq(consent)
         )).thenThrow(new ResourceAccessException("timeout"));
         when(integrationService.fetchScheduledBill(
-                eq("KSEB"), eq(java.util.Map.of("ConsumerNo", "K-2")), eq(consent)
+                eq(successfulClaim), eq("KSEB"),
+                eq(java.util.Map.of("ConsumerNo", "K-2")), eq(consent)
         )).thenReturn(response);
 
         scheduler.fetchDueBills();
@@ -222,6 +253,33 @@ class AutomaticBillFetchSchedulerTest {
                 5
         );
         verify(savedBillService).completeScheduledFetch(successfulClaim, response);
+    }
+
+    @Test
+    void defers_unavailable_artifact_validation_without_consuming_retries() throws Exception {
+        AutomaticBillFetchScheduler scheduler = scheduler();
+        ScheduledBillFetch claim = claim(51L, 70L, 8L);
+        JsonNode consent = new ObjectMapper().readTree("{\"consent\":{\"id\":\"provided\"}}");
+        when(persistenceService.claimEligibleFetches(any(), eq(10), eq(15L)))
+                .thenReturn(List.of(claim));
+        when(consentProvider.findValidConsent(claim)).thenReturn(Optional.of(consent));
+        when(integrationService.fetchScheduledBill(
+                claim,
+                "KSEB",
+                java.util.Map.of("ConsumerNo", "K-1"),
+                consent
+        )).thenThrow(new org.springframework.web.server.ResponseStatusException(
+                HttpStatus.SERVICE_UNAVAILABLE,
+                "A verified API Setu consent artifact is not available."
+        ));
+
+        scheduler.fetchDueBills();
+
+        verify(savedBillService).deferScheduledFetch(claim, 24L);
+        verify(savedBillService, never()).failScheduledFetch(
+                any(), any(), eq(false),
+                anyLong(), anyLong(), anyInt()
+        );
     }
 
     private AutomaticBillFetchScheduler scheduler() {

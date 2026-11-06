@@ -29,6 +29,8 @@ import java.util.UUID;
                 columnNames = {"customer_id", "provider_id", "consumer_identity_hash"}
         ),
         indexes = {
+                @Index(name = "uk_saved_bill_application_consent",
+                        columnList = "application_consent_id", unique = true),
                 @Index(name = "idx_saved_bills_customer_category", columnList = "customer_id,category_id"),
                 @Index(name = "idx_saved_bills_consumer_number", columnList = "consumer_number"),
                 @Index(name = "idx_saved_bills_provider", columnList = "provider_id")
@@ -51,6 +53,10 @@ public class SavedBill {
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "category_id", nullable = false)
     private BillCategory category;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "application_consent_id")
+    private CustomerBillConsent applicationConsent;
 
     @Column(name = "consumer_number", nullable = false, length = 255)
     private String consumerNumber;
@@ -156,6 +162,14 @@ public class SavedBill {
 
     public BillCategory getCategory() {
         return category;
+    }
+
+    public CustomerBillConsent getApplicationConsent() {
+        return applicationConsent;
+    }
+
+    public void setApplicationConsent(CustomerBillConsent applicationConsent) {
+        this.applicationConsent = applicationConsent;
     }
 
     public String getConsumerNumber() {
