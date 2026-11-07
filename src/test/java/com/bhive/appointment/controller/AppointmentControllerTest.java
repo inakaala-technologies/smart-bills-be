@@ -392,4 +392,60 @@ class AppointmentControllerTest {
 
         Mockito.verify(appointmentRepository, Mockito.never()).save(Mockito.any(Appointment.class));
     }
+
+    @Test
+    void myAppointmentsShouldBeForbiddenWithoutTenantContext() throws Exception {
+        TenantContext.clear();
+
+        mockMvc.perform(get("/api/v1/businesses/1/appointments/mine"))
+            .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void myAppointmentsShouldBeEmptyWhenCustomerIsNotLinkedToBusiness() throws Exception {
+        Business business = new Business();
+        business.setTenantId(5L);
+        CustomerProfile customer = new CustomerProfile();
+        customer.setId(12L);
+
+        Mockito.when(businessRepository.findById(1L)).thenReturn(Optional.of(business));
+        Mockito.when(customerProfileRepository.findByUserIdAndTenantId(9L, 5L)).thenReturn(Optional.of(customer));
+        Mockito.when(businessCustomerRepository.findByTenantIdAndBusinessId(5L, 1L)).thenReturn(List.of());
+
+        mockMvc.perform(get("/api/v1/businesses/1/appointments/mine"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$", hasSize(0)));
+
+        Mockito.verify(appointmentRepository, Mockito.never())
+            .findByBusinessIdAndCustomerIdOrderByScheduledAtDesc(Mockito.anyLong(), Mockito.anyLong());
+    }
+
+    @Test
+    void myAppointmentsShouldQueryOnlyTheSignedInCustomersAppointments() throws Exception {
+        Business business = new Business();
+        business.setTenantId(5L);
+        CustomerProfile customer = new CustomerProfile();
+        customer.setId(12L);
+        BusinessCustomer link = new BusinessCustomer();
+        link.setCustomerProfileId(12L);
+        link.setStatus("ACTIVE");
+        Appointment appointment = new Appointment();
+        appointment.setId(23L);
+        appointment.setBusinessId(1L);
+        appointment.setCustomerId(12L);
+        appointment.setServiceName("Consultation");
+
+        Mockito.when(businessRepository.findById(1L)).thenReturn(Optional.of(business));
+        Mockito.when(customerProfileRepository.findByUserIdAndTenantId(9L, 5L)).thenReturn(Optional.of(customer));
+        Mockito.when(businessCustomerRepository.findByTenantIdAndBusinessId(5L, 1L)).thenReturn(List.of(link));
+        Mockito.when(appointmentRepository.findByBusinessIdAndCustomerIdOrderByScheduledAtDesc(1L, 12L))
+            .thenReturn(List.of(appointment));
+
+        mockMvc.perform(get("/api/v1/businesses/1/appointments/mine"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$", hasSize(1)))
+            .andExpect(jsonPath("$[0].customerId").value(12));
+
+        Mockito.verify(appointmentRepository).findByBusinessIdAndCustomerIdOrderByScheduledAtDesc(1L, 12L);
+    }
 }

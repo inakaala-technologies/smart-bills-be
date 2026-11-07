@@ -2,6 +2,7 @@ package com.bhive.billing.controller;
 
 import com.bhive.billing.entity.Product;
 import com.bhive.billing.repository.ProductRepository;
+import com.bhive.business.repository.BusinessRepository;
 import com.bhive.business.service.BusinessMembershipService;
 import com.bhive.common.util.TenantContext;
 import java.util.List;
@@ -18,10 +19,13 @@ public class ProductController {
 
     private final ProductRepository productRepository;
     private final BusinessMembershipService businessMembershipService;
+    private final BusinessRepository businessRepository;
 
-    public ProductController(ProductRepository productRepository, BusinessMembershipService businessMembershipService) {
+    public ProductController(ProductRepository productRepository, BusinessMembershipService businessMembershipService,
+                             BusinessRepository businessRepository) {
         this.productRepository = productRepository;
         this.businessMembershipService = businessMembershipService;
+        this.businessRepository = businessRepository;
     }
 
     private boolean canAccessBusiness(Long businessId) {
@@ -82,6 +86,23 @@ public ResponseEntity<Product> getProductById(@PathVariable Long id) {
 
     return result.map(ResponseEntity::ok)
             .orElse(ResponseEntity.notFound().build());
+}
+
+    @GetMapping("/products/business/{businessId}")
+    public ResponseEntity<List<Product>> getProductsForCustomer(@PathVariable Long businessId) {
+        Long tenantId = TenantContext.getTenantId();
+        Long userId = TenantContext.getUserId();
+        if (tenantId == null || userId == null) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
+        boolean businessInTenant = businessRepository.findById(businessId)
+            .map(b -> tenantId.equals(b.getTenantId()))
+            .orElse(false);
+        if (!businessInTenant) {
+            return ResponseEntity.notFound().build();
+        }
+        return ResponseEntity.ok(
+            productRepository.findByBusinessIdAndStatusOrderByNameAsc(businessId, ProductStatus.ACTIVE));
 }
 
     @PostMapping("/products")

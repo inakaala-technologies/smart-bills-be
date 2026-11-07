@@ -110,6 +110,24 @@ public class InvoiceController {
 				.map(InvoiceResponse::from).toList();
 	}
 
+	@GetMapping("/invoices/customer/business/{businessId}")
+	public List<InvoiceResponse> getMyInvoicesForBusiness(@PathVariable Long businessId) {
+		Long tenantId = TenantContext.getTenantId();
+		Long userId = TenantContext.getUserId();
+		if (tenantId == null || userId == null) {
+			return List.of();
+		}
+		return customerProfileRepository.findByUserIdAndTenantId(userId, tenantId)
+			.filter(customer -> businessCustomerRepository
+				.findByBusinessIdAndCustomerProfileId(businessId, customer.getId())
+				.filter(link -> "ACTIVE".equalsIgnoreCase(link.getStatus()))
+				.isPresent())
+			.map(customer -> invoiceRepository
+				.findByBusinessIdAndCustomerIdOrderByIssueDateDesc(businessId, customer.getId())
+				.stream().map(InvoiceResponse::from).toList())
+			.orElse(List.of());
+	}
+
 	@GetMapping("/invoices/{id}")
 	public ResponseEntity<InvoiceResponse> getInvoiceById(@PathVariable Long id) {
 		Long tenantId = TenantContext.getTenantId();

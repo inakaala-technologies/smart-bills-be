@@ -11,6 +11,7 @@ import org.springframework.stereotype.Repository;
 @Repository
 public interface InvoiceRepository extends JpaRepository<Invoice, Long> {
 	List<Invoice> findByBusinessId(Long businessId);
+	List<Invoice> findByBusinessIdAndCustomerIdOrderByIssueDateDesc(Long businessId, Long customerId);
 
 	List<Invoice> findByCustomerIdIn(Collection<Long> customerIds);
 	Optional<Invoice> findByAppointmentId(Long appointmentId);

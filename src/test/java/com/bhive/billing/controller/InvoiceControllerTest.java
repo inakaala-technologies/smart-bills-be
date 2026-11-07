@@ -114,6 +114,61 @@ class InvoiceControllerTest {
 	}
 
 	@Test
+	void myBusinessInvoicesShouldBeEmptyWithoutTenantContext() throws Exception {
+		TenantContext.clear();
+
+		mockMvc.perform(get("/api/v1/billing/invoices/customer/business/5").accept(MediaType.APPLICATION_JSON))
+				.andExpect(status().isOk()).andExpect(jsonPath("$", hasSize(0)));
+	}
+
+	@Test
+	void myBusinessInvoicesShouldBeEmptyWhenCustomerIsNotLinked() throws Exception {
+		TenantContext.setTenantId(11L);
+		TenantContext.setUserId(99L);
+		CustomerProfile customer = new CustomerProfile();
+		customer.setId(42L);
+		Mockito.when(customerProfileRepository.findByUserIdAndTenantId(99L, 11L)).thenReturn(Optional.of(customer));
+		Mockito.when(businessCustomerRepository.findByBusinessIdAndCustomerProfileId(5L, 42L))
+				.thenReturn(Optional.empty());
+
+		mockMvc.perform(get("/api/v1/billing/invoices/customer/business/5").accept(MediaType.APPLICATION_JSON))
+				.andExpect(status().isOk()).andExpect(jsonPath("$", hasSize(0)));
+
+		Mockito.verify(invoiceRepository, Mockito.never())
+				.findByBusinessIdAndCustomerIdOrderByIssueDateDesc(Mockito.anyLong(), Mockito.anyLong());
+	}
+
+	@Test
+	void myBusinessInvoicesShouldQueryOnlyTheSignedInCustomersInvoices() throws Exception {
+		TenantContext.setTenantId(11L);
+		TenantContext.setUserId(99L);
+		CustomerProfile customer = new CustomerProfile();
+		customer.setId(42L);
+		BusinessCustomer link = new BusinessCustomer();
+		link.setStatus("ACTIVE");
+		Invoice invoice = new Invoice();
+		invoice.setId(301L);
+		invoice.setBusinessId(5L);
+		invoice.setCustomerId(42L);
+		invoice.setInvoiceNumber("INV-MINE-1");
+		invoice.setIssueDate(LocalDate.now());
+		invoice.setTotalAmount(new BigDecimal("100.00"));
+		invoice.setStatus(InvoiceStatus.SENT);
+		Mockito.when(customerProfileRepository.findByUserIdAndTenantId(99L, 11L)).thenReturn(Optional.of(customer));
+		Mockito.when(businessCustomerRepository.findByBusinessIdAndCustomerProfileId(5L, 42L))
+				.thenReturn(Optional.of(link));
+		Mockito.when(invoiceRepository.findByBusinessIdAndCustomerIdOrderByIssueDateDesc(5L, 42L))
+				.thenReturn(List.of(invoice));
+
+		mockMvc.perform(get("/api/v1/billing/invoices/customer/business/5").accept(MediaType.APPLICATION_JSON))
+				.andExpect(status().isOk()).andExpect(jsonPath("$", hasSize(1)))
+				.andExpect(jsonPath("$[0].customerId").value(42))
+				.andExpect(jsonPath("$[0].invoiceNumber").value("INV-MINE-1"));
+
+		Mockito.verify(invoiceRepository).findByBusinessIdAndCustomerIdOrderByIssueDateDesc(5L, 42L);
+	}
+
+	@Test
 	void createInvoiceShouldLinkCustomerAndGenerateInvoiceMetadata() throws Exception {
 		TenantContext.setTenantId(10L);
 		TenantContext.setUserId(20L);

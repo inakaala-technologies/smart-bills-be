@@ -113,6 +113,27 @@ public class AppointmentController {
             .orElse(ResponseEntity.status(HttpStatus.FORBIDDEN).build());
     }
 
+    @GetMapping("/businesses/{businessId}/appointments/mine")
+    public ResponseEntity<List<Appointment>> getMyAppointmentsForBusiness(@PathVariable Long businessId) {
+        Long tenantId = TenantContext.getTenantId();
+        Long userId = TenantContext.getUserId();
+        if (tenantId == null || userId == null) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
+        boolean businessInTenant = businessRepository.findById(businessId)
+            .map(b -> tenantId.equals(b.getTenantId()))
+            .orElse(false);
+        if (!businessInTenant) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
+        }
+        Optional<CustomerProfile> customer = customerProfileRepository.findByUserIdAndTenantId(userId, tenantId);
+        if (customer.isEmpty() || !isCustomerLinkedToBusiness(tenantId, businessId, customer.get().getId())) {
+            return ResponseEntity.ok(List.of());
+        }
+        return ResponseEntity.ok(
+            appointmentRepository.findByBusinessIdAndCustomerIdOrderByScheduledAtDesc(businessId, customer.get().getId()));
+    }
+
     @GetMapping("/appointments/availability")
     public ResponseEntity<AppointmentAvailabilityResponse> getAvailability(@RequestParam Long businessId,
                                                                             @RequestParam Long serviceId,
