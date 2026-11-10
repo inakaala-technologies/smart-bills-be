@@ -25,6 +25,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -181,7 +182,7 @@ public class InvoiceController {
         invoice.setBusinessId(request.businessId());
         invoice.setCustomerId(request.customerId());
         invoice.setInvoiceNumber("INV-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase());
-        invoice.setIssueDate(LocalDate.now());
+        invoice.setIssueDate(LocalDate.now(ZoneId.of("Asia/Kolkata")));
         invoice.setDueDate(request.dueDate());
         invoice.setSubtotal(request.subtotal());
         invoice.setGstAmount(request.gstAmount());

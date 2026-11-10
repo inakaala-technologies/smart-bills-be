@@ -1,0 +1,28 @@
+CREATE TABLE pos_partner_applications (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    application_id VARCHAR(36) NOT NULL,
+    status_token_hash VARCHAR(64) NOT NULL,
+    partner_name VARCHAR(160) NOT NULL,
+    contact_name VARCHAR(160) NOT NULL,
+    contact_email VARCHAR(254) NOT NULL,
+    contact_phone VARCHAR(32) NOT NULL,
+    retailer_reference VARCHAR(100) NOT NULL,
+    retailer_name VARCHAR(160) NOT NULL,
+    outlet_reference VARCHAR(100) NOT NULL,
+    outlet_name VARCHAR(160) NOT NULL,
+    public_key VARCHAR(1024) NOT NULL,
+    status VARCHAR(16) NOT NULL DEFAULT 'PENDING',
+    partner_id VARCHAR(36) NULL,
+    decision_reason VARCHAR(1000) NULL,
+    submitted_at DATETIME(6) NOT NULL,
+    reviewed_at DATETIME(6) NULL,
+    reviewed_by BIGINT NULL,
+    version BIGINT NOT NULL DEFAULT 0,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_pos_partner_app_application_id (application_id),
+    UNIQUE KEY uk_pos_partner_app_partner_id (partner_id),
+    KEY idx_pos_partner_app_status (status),
+    KEY idx_pos_partner_app_submitted (submitted_at),
+    CONSTRAINT fk_pos_partner_app_partner
+        FOREIGN KEY (partner_id) REFERENCES pos_integrations (partner_id)
+);

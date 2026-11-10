@@ -42,9 +42,27 @@ public class IdempotencyFilter extends OncePerRequestFilter {
             filterChain.doFilter(request, response);
             return;
         }
+        boolean secretResponse = "/api/v1/customer/receipt-link-tokens".equals(path)
+            || "/api/v1/customer/receipt-link-tokens/".equals(path)
+            || "/api/v1/pos-partner-applications".equals(path);
+        if (secretResponse) {
+            byte[] body = request.getInputStream().readNBytes(MAX_REQUEST_BYTES + 1);
+            if (body.length > MAX_REQUEST_BYTES) {
+                response.sendError(HttpServletResponse.SC_REQUEST_ENTITY_TOO_LARGE,
+                    "Request bodies must not exceed 1 MiB.");
+                return;
+            }
+            filterChain.doFilter(new CachedBodyRequest(request, body), response);
+            return;
+        }
 
+        boolean partnerReceiptRequest = "/api/v1/partner/receipts".equals(path);
         String idempotencyKey = request.getHeader("Idempotency-Key");
         if (idempotencyKey == null) {
+            if (partnerReceiptRequest) {
+                response.sendError(HttpServletResponse.SC_BAD_REQUEST, "Idempotency-Key is required.");
+                return;
+            }
             filterChain.doFilter(request, response);
             return;
         }
@@ -62,6 +80,10 @@ public class IdempotencyFilter extends OncePerRequestFilter {
         if (body.length > MAX_REQUEST_BYTES) {
             response.sendError(HttpServletResponse.SC_REQUEST_ENTITY_TOO_LARGE,
                 "Idempotency-keyed request bodies must not exceed 1 MiB.");
+            return;
+        }
+        if (partnerReceiptRequest) {
+            filterChain.doFilter(new CachedBodyRequest(request, body), response);
             return;
         }
         String fingerprint = fingerprint(request, body);

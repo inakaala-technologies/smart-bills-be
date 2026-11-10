@@ -8,6 +8,7 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 class IdempotencyFilterTest {
 
@@ -47,6 +48,62 @@ class IdempotencyFilterTest {
 
         assertEquals(409, conflict.getStatus());
         assertEquals(1, executions.get());
+    }
+
+    @Test
+    void doesNotCacheSingleUseReceiptLinkTokens() throws Exception {
+        IdempotencyFilter filter = new IdempotencyFilter();
+        AtomicInteger executions = new AtomicInteger();
+
+        MockHttpServletResponse first = performSingleUseEndpoint(
+            filter, executions, "/api/v1/customer/receipt-link-tokens", "receipt-token-request-1"
+        );
+        MockHttpServletResponse second = performSingleUseEndpoint(
+            filter, executions, "/api/v1/customer/receipt-link-tokens", "receipt-token-request-1"
+        );
+
+        assertEquals(2, executions.get());
+        assertEquals("token-1", first.getContentAsString());
+        assertEquals("token-2", second.getContentAsString());
+        assertNull(second.getHeader("Idempotency-Replayed"));
+    }
+
+    @Test
+    void doesNotCachePartnerApplicationStatusAccessToken() throws Exception {
+        IdempotencyFilter filter = new IdempotencyFilter();
+        AtomicInteger executions = new AtomicInteger();
+
+        MockHttpServletResponse first = performSingleUseEndpoint(
+            filter, executions, "/api/v1/pos-partner-applications", "partner-application-1"
+        );
+        MockHttpServletResponse second = performSingleUseEndpoint(
+            filter, executions, "/api/v1/pos-partner-applications", "partner-application-1"
+        );
+
+        assertEquals(2, executions.get());
+        assertEquals("token-1", first.getContentAsString());
+        assertEquals("token-2", second.getContentAsString());
+        assertNull(second.getHeader("Idempotency-Replayed"));
+    }
+
+    private MockHttpServletResponse performSingleUseEndpoint(
+        IdempotencyFilter filter,
+        AtomicInteger executions,
+        String path,
+        String idempotencyKey
+    ) throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", path);
+        request.setRemoteAddr("192.0.2.11");
+        request.setContentType("application/json");
+        request.setContent("{}".getBytes(StandardCharsets.UTF_8));
+        request.addHeader("Idempotency-Key", idempotencyKey);
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        filter.doFilter(request, response, (servletRequest, servletResponse) -> {
+            int tokenNumber = executions.incrementAndGet();
+            ((jakarta.servlet.http.HttpServletResponse) servletResponse).getWriter()
+                .write("token-" + tokenNumber);
+        });
+        return response;
     }
 
     private MockHttpServletResponse perform(IdempotencyFilter filter, String body,

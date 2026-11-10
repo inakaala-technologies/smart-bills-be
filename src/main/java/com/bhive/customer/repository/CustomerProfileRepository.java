@@ -1,6 +1,7 @@
 package com.bhive.customer.repository;
 
 import com.bhive.customer.entity.CustomerProfile;
+import jakarta.persistence.LockModeType;
 import java.util.Optional;
 import java.util.Collection;
 import java.util.List;
@@ -8,6 +9,7 @@ import java.util.List;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -15,6 +17,12 @@ import org.springframework.stereotype.Repository;
 @Repository
 public interface CustomerProfileRepository extends JpaRepository<CustomerProfile, Long> {
 	Optional<CustomerProfile> findByUserIdAndTenantId(Long userId, Long tenantId);
+
+	@Lock(LockModeType.PESSIMISTIC_WRITE)
+	@Query("SELECT customer FROM CustomerProfile customer WHERE customer.userId = :userId AND customer.tenantId = :tenantId")
+	Optional<CustomerProfile> findByUserIdAndTenantIdForUpdate(
+			@Param("userId") Long userId,
+			@Param("tenantId") Long tenantId);
 
 	java.util.List<CustomerProfile> findByTenantId(Long tenantId);
 
@@ -45,4 +53,8 @@ public interface CustomerProfileRepository extends JpaRepository<CustomerProfile
 	Optional<CustomerProfile> findFirstByPhoneAndTenantIdAndUserIdIsNull(String phone, Long tenantId);
 
 	List<CustomerProfile> findByUserIdIn(Collection<Long> userIds);
+
+	List<CustomerProfile> findByEmailNormalizedAndReceiptEmailEnabledTrueAndUserIdIsNotNull(String emailNormalized);
+
+	List<CustomerProfile> findByPhoneNormalizedAndReceiptPhoneEnabledTrueAndUserIdIsNotNull(String phoneNormalized);
 }

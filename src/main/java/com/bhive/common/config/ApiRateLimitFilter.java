@@ -53,10 +53,14 @@ public class ApiRateLimitFilter extends OncePerRequestFilter {
         }
 
         boolean authRequest = path.startsWith("/api/v1/auth/");
-        int capacity = authRequest ? authCapacity : apiCapacity;
-        double refillRate = authRequest ? authTokensPerSecond : apiTokensPerSecond;
+        boolean partnerApplicationSubmission = "POST".equalsIgnoreCase(request.getMethod())
+            && "/api/v1/pos-partner-applications".equals(path);
+        int capacity = partnerApplicationSubmission ? 5 : authRequest ? authCapacity : apiCapacity;
+        double refillRate = partnerApplicationSubmission ? 1d / 12d
+            : authRequest ? authTokensPerSecond : apiTokensPerSecond;
         String clientKey = request.getRemoteAddr() == null ? "unknown" : request.getRemoteAddr();
-        String bucketKey = (authRequest ? "auth:" : "api:") + clientKey;
+        String bucketKey = (partnerApplicationSubmission ? "partner-onboarding:"
+            : authRequest ? "auth:" : "api:") + clientKey;
         TokenBucket bucket = buckets.computeIfAbsent(bucketKey, ignored -> new TokenBucket(capacity));
         long retryAfter = bucket.tryConsume(capacity, refillRate);
 
