@@ -6,6 +6,7 @@ import com.bhive.business.entity.Business;
 import com.bhive.business.repository.BusinessRepository;
 import com.bhive.business.service.BusinessMembershipService;
 import com.bhive.common.cache.CacheNames;
+import com.bhive.common.service.CacheInvalidationService;
 import com.bhive.common.util.TenantContext;
 import com.bhive.customer.entity.BusinessCustomer;
 import com.bhive.customer.repository.BusinessCustomerRepository;
@@ -38,16 +39,18 @@ public class AppointmentConfigurationController {
 	private final BusinessMembershipService businessMembershipService;
 	private final BusinessCustomerRepository businessCustomerRepository;
 	private final CustomerProfileRepository customerProfileRepository;
+	private final CacheInvalidationService cacheInvalidationService;
 
 	public AppointmentConfigurationController(AppointmentServiceRepository appointmentServiceRepository,
 			BusinessRepository businessRepository, BusinessMembershipService businessMembershipService,
-			BusinessCustomerRepository businessCustomerRepository,
-			CustomerProfileRepository customerProfileRepository) {
+			BusinessCustomerRepository businessCustomerRepository, CustomerProfileRepository customerProfileRepository,
+			CacheInvalidationService cacheInvalidationService) {
 		this.appointmentServiceRepository = appointmentServiceRepository;
 		this.businessRepository = businessRepository;
 		this.businessMembershipService = businessMembershipService;
 		this.businessCustomerRepository = businessCustomerRepository;
 		this.customerProfileRepository = customerProfileRepository;
+		this.cacheInvalidationService = cacheInvalidationService;
 	}
 
 	@PutMapping("/businesses/{businessId}/appointments-enabled")
@@ -129,8 +132,8 @@ public class AppointmentConfigurationController {
 	}
 
 	@GetMapping("/appointment-services")
-	@Cacheable(cacheNames = CacheNames.APPOINTMENT_SERVICES, key = "T(com.bhive.common.context.TenantContext).getTenantId() + ':' + "
-			+ "T(com.bhive.common.context.TenantContext).getUserId() + ':' + "
+	@Cacheable(cacheNames = CacheNames.APPOINTMENT_SERVICES, key = "T(com.bhive.common.util.TenantContext).getTenantId() + ':' + "
+			+ "T(com.bhive.common.util.TenantContext).getUserId() + ':' + "
 			+ "#businessId", unless = "#result == null || !#result.statusCode.is2xxSuccessful() || #result.body.isEmpty()")
 	public ResponseEntity<List<AppointmentService>> getAppointmentServices(@RequestParam Long businessId) {
 		Long tenantId = TenantContext.getTenantId();
@@ -200,6 +203,7 @@ public class AppointmentConfigurationController {
 			service.setDurationMinutes(request.durationMinutes());
 			service.setEnabled(request.enabled());
 			appointmentServiceRepository.save(service);
+			cacheInvalidationService.evictAppointmentServiceCaches();
 		}
 
 		return ResponseEntity

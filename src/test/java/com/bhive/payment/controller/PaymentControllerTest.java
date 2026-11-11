@@ -7,6 +7,7 @@ import com.bhive.billing.entity.Invoice;
 import com.bhive.billing.entity.InvoiceStatus;
 import com.bhive.billing.repository.InvoiceRepository;
 import com.bhive.payment.repository.PaymentRepository;
+import com.bhive.common.service.CacheInvalidationService;
 import com.bhive.common.util.TenantContext;
 import com.bhive.customer.entity.CustomerProfile;
 import com.bhive.customer.repository.CustomerProfileRepository;
@@ -52,6 +53,9 @@ class PaymentControllerTest {
 
     @MockBean
     private NotificationService notificationService;
+    
+    @MockBean
+    private CacheInvalidationService cacheInvalidationService;
 
     @AfterEach
     void clearTenantContext() {

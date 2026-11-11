@@ -1,120 +1,180 @@
 package com.bhive.business.controller;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.bhive.billing.entity.Invoice;
-import com.bhive.billing.entity.InvoiceStatus;
-import com.bhive.billing.repository.InvoiceRepository;
-import com.bhive.business.dto.BusinessInsightsResponse;
-import com.bhive.business.entity.Business;
-import com.bhive.business.entity.BusinessUser;
-import com.bhive.business.repository.BusinessRepository;
-import com.bhive.business.repository.BusinessUserRepository;
-import com.bhive.common.util.TenantContext;
-import com.bhive.customer.entity.BusinessCustomer;
-import com.bhive.customer.repository.BusinessCustomerRepository;
-import com.bhive.membership.entity.Membership;
-import com.bhive.membership.entity.MembershipStatus;
-import com.bhive.membership.repository.MembershipRepository;
-import com.bhive.payment.entity.Payment;
-import com.bhive.payment.entity.PaymentStatus;
-import com.bhive.payment.repository.PaymentRepository;
-import java.math.BigDecimal;
-import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
+
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.springframework.http.HttpStatus;
 
+import com.bhive.billing.repository.InvoiceRepository;
+import com.bhive.business.dto.BusinessInsightsResponse;
+import com.bhive.business.dto.BusinessInsightsResponse.CustomerMetrics;
+import com.bhive.business.dto.BusinessInsightsResponse.MembershipMetrics;
+import com.bhive.business.entity.Business;
+import com.bhive.business.entity.BusinessUser;
+import com.bhive.business.repository.BusinessRepository;
+import com.bhive.business.repository.BusinessUserRepository;
+import com.bhive.business.service.BusinessInsightsService;
+import com.bhive.common.util.TenantContext;
+import com.bhive.customer.repository.BusinessCustomerRepository;
+import com.bhive.membership.repository.MembershipRepository;
+import com.bhive.payment.repository.PaymentRepository;
+
 class BusinessInsightsControllerTest {
 
-    private final BusinessRepository businessRepository = Mockito.mock(BusinessRepository.class);
-    private final BusinessUserRepository businessUserRepository = Mockito.mock(BusinessUserRepository.class);
-    private final InvoiceRepository invoiceRepository = Mockito.mock(InvoiceRepository.class);
-    private final PaymentRepository paymentRepository = Mockito.mock(PaymentRepository.class);
-    private final MembershipRepository membershipRepository = Mockito.mock(MembershipRepository.class);
-    private final BusinessCustomerRepository businessCustomerRepository = Mockito.mock(BusinessCustomerRepository.class);
-    private final BusinessInsightsController controller = new BusinessInsightsController(
-        businessRepository, businessUserRepository, invoiceRepository, paymentRepository,
-        membershipRepository, businessCustomerRepository
-    );
+	private final BusinessRepository businessRepository = Mockito.mock(BusinessRepository.class);
 
-    @AfterEach
-    void clearTenantContext() {
-        TenantContext.clear();
-    }
+	private final BusinessUserRepository businessUserRepository = Mockito.mock(BusinessUserRepository.class);
 
-    @Test
-    void aggregatesAuthorizedBusinessTrends() {
-        TenantContext.setTenantId(5L);
-        TenantContext.setUserId(7L);
-        Business business = new Business();
-        business.setTenantId(5L);
-        BusinessUser user = new BusinessUser();
-        user.setUserId(7L);
-        user.setStatus("ACTIVE");
-        when(businessRepository.findById(3L)).thenReturn(Optional.of(business));
-        when(businessUserRepository.findByTenantIdAndBusinessIdAndStatusIgnoreCase(5L, 3L, "ACTIVE"))
-            .thenReturn(List.of(user));
+	private final InvoiceRepository invoiceRepository = Mockito.mock(InvoiceRepository.class);
 
-        Invoice overdueInvoice = new Invoice();
-        overdueInvoice.setCustomerId(12L);
-        overdueInvoice.setStatus(InvoiceStatus.SENT);
-        overdueInvoice.setDueDate(LocalDate.now().minusDays(40));
-        overdueInvoice.setTotalAmount(new BigDecimal("350.00"));
-        Invoice paidInvoice = new Invoice();
-        paidInvoice.setCustomerId(12L);
-        paidInvoice.setStatus(InvoiceStatus.PAID);
-        when(invoiceRepository.findByBusinessId(3L)).thenReturn(List.of(overdueInvoice, paidInvoice));
+	private final PaymentRepository paymentRepository = Mockito.mock(PaymentRepository.class);
 
-        Payment payment = new Payment();
-        payment.setStatus(PaymentStatus.VERIFIED);
-        payment.setPaymentDate(LocalDateTime.now());
-        payment.setAmount(new BigDecimal("500.00"));
-        when(paymentRepository.findByBusinessId(3L)).thenReturn(List.of(payment));
+	private final MembershipRepository membershipRepository = Mockito.mock(MembershipRepository.class);
 
-        Membership membership = new Membership();
-        membership.setStatus(MembershipStatus.ACTIVE);
-        membership.setCustomerId(12L);
-        membership.setStartDate(LocalDate.now().minusDays(10));
-        membership.setEndDate(LocalDate.now().plusDays(20));
-        Membership previousMembership = new Membership();
-        previousMembership.setStatus(MembershipStatus.EXPIRED);
-        previousMembership.setCustomerId(12L);
-        previousMembership.setStartDate(LocalDate.now().minusDays(50));
-        previousMembership.setEndDate(LocalDate.now().minusDays(11));
-        when(membershipRepository.findByBusinessIdAndTenantId(3L, 5L))
-            .thenReturn(List.of(membership, previousMembership));
+	private final BusinessCustomerRepository businessCustomerRepository = Mockito
+			.mock(BusinessCustomerRepository.class);
 
-        BusinessCustomer customer = new BusinessCustomer();
-        customer.setCustomerProfileId(12L);
-        customer.setCreatedAt(LocalDateTime.now());
-        when(businessCustomerRepository.findByTenantIdAndBusinessId(5L, 3L)).thenReturn(List.of(customer));
+	private final BusinessInsightsService businessInsightsService = Mockito.mock(BusinessInsightsService.class);
 
-        var response = controller.getInsights(3L, 6);
+	private final BusinessInsightsController controller = new BusinessInsightsController(businessRepository,
+			businessUserRepository, invoiceRepository, paymentRepository, membershipRepository,
+			businessCustomerRepository, businessInsightsService);
 
-        assertEquals(HttpStatus.OK, response.getStatusCode());
-        BusinessInsightsResponse insights = response.getBody();
-        assertEquals(new BigDecimal("500.00"), insights.revenueTrend().get(5).amount());
-        assertEquals(new BigDecimal("350.00"), insights.paymentAging().get(2).amount());
-        assertEquals(1, insights.memberships().active());
-        assertEquals(1, insights.memberships().renewingSoon());
-        assertEquals(1.0, insights.memberships().renewalRate());
-        assertEquals(0, insights.memberships().churned());
-        assertEquals(1, insights.customers().acquiredLast30Days());
-        assertEquals(1, insights.customers().repeatCustomers());
-    }
+	@AfterEach
+	void clearTenantContext() {
+		TenantContext.clear();
+	}
 
-    @Test
-    void deniesInsightsForBusinessOutsideTenant() {
-        TenantContext.setTenantId(5L);
-        TenantContext.setUserId(7L);
-        when(businessRepository.findById(3L)).thenReturn(Optional.empty());
+	@Test
+	void returnsInsightsForAuthorizedBusiness() {
 
-        assertEquals(HttpStatus.FORBIDDEN, controller.getInsights(3L, 6).getStatusCode());
-    }
+		TenantContext.setTenantId(5L);
+		TenantContext.setUserId(7L);
+
+		Business business = new Business();
+		business.setTenantId(5L);
+
+		BusinessUser user = new BusinessUser();
+		user.setUserId(7L);
+		user.setStatus("ACTIVE");
+
+		when(businessRepository.findById(3L)).thenReturn(Optional.of(business));
+
+		when(businessUserRepository.findByTenantIdAndBusinessIdAndStatusIgnoreCase(5L, 3L, "ACTIVE"))
+				.thenReturn(List.of(user));
+
+		BusinessInsightsResponse expectedResponse = new BusinessInsightsResponse(List.of(), List.of(),
+				new MembershipMetrics(1, 1, 0, 1.0), new CustomerMetrics(1, 1, 1.0, List.of()));
+
+		when(businessInsightsService.getInsights(5L, 7L, 3L, 6)).thenReturn(expectedResponse);
+
+		var response = controller.getInsights(3L, 6);
+
+		assertEquals(HttpStatus.OK, response.getStatusCode());
+		assertNotNull(response.getBody());
+		assertEquals(expectedResponse, response.getBody());
+
+		verify(businessInsightsService).getInsights(5L, 7L, 3L, 6);
+	}
+
+	@Test
+	void deniesInsightsForBusinessOutsideTenant() {
+
+		TenantContext.setTenantId(5L);
+		TenantContext.setUserId(7L);
+
+		when(businessRepository.findById(3L)).thenReturn(Optional.empty());
+
+		var response = controller.getInsights(3L, 6);
+
+		assertEquals(HttpStatus.FORBIDDEN, response.getStatusCode());
+
+		verify(businessInsightsService, never()).getInsights(Mockito.anyLong(), Mockito.anyLong(), Mockito.anyLong(),
+				Mockito.anyInt());
+	}
+
+	@Test
+	void deniesInsightsForInactiveOrUnauthorizedUser() {
+
+		TenantContext.setTenantId(5L);
+		TenantContext.setUserId(7L);
+
+		Business business = new Business();
+		business.setTenantId(5L);
+
+		when(businessRepository.findById(3L)).thenReturn(Optional.of(business));
+
+		when(businessUserRepository.findByTenantIdAndBusinessIdAndStatusIgnoreCase(5L, 3L, "ACTIVE"))
+				.thenReturn(List.of());
+
+		var response = controller.getInsights(3L, 6);
+
+		assertEquals(HttpStatus.FORBIDDEN, response.getStatusCode());
+
+		verify(businessInsightsService, never()).getInsights(Mockito.anyLong(), Mockito.anyLong(), Mockito.anyLong(),
+				Mockito.anyInt());
+	}
+
+	@Test
+	void returnsBadRequestWhenTenantIdIsMissing() {
+
+		TenantContext.setUserId(7L);
+
+		var response = controller.getInsights(3L, 6);
+
+		assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+
+		verify(businessInsightsService, never()).getInsights(Mockito.anyLong(), Mockito.anyLong(), Mockito.anyLong(),
+				Mockito.anyInt());
+	}
+
+	@Test
+	void returnsBadRequestWhenUserIdIsMissing() {
+
+		TenantContext.setTenantId(5L);
+
+		var response = controller.getInsights(3L, 6);
+
+		assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+
+		verify(businessInsightsService, never()).getInsights(Mockito.anyLong(), Mockito.anyLong(), Mockito.anyLong(),
+				Mockito.anyInt());
+	}
+
+	@Test
+	void returnsBadRequestWhenMonthsAreLessThanThree() {
+
+		TenantContext.setTenantId(5L);
+		TenantContext.setUserId(7L);
+
+		var response = controller.getInsights(3L, 2);
+
+		assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+
+		verify(businessInsightsService, never()).getInsights(Mockito.anyLong(), Mockito.anyLong(), Mockito.anyLong(),
+				Mockito.anyInt());
+	}
+
+	@Test
+	void returnsBadRequestWhenMonthsAreGreaterThanTwentyFour() {
+
+		TenantContext.setTenantId(5L);
+		TenantContext.setUserId(7L);
+
+		var response = controller.getInsights(3L, 25);
+
+		assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+
+		verify(businessInsightsService, never()).getInsights(Mockito.anyLong(), Mockito.anyLong(), Mockito.anyLong(),
+				Mockito.anyInt());
+	}
 }
