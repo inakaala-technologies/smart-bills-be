@@ -1,6 +1,8 @@
 package com.bhive.loyalty.controller;
 
 import com.bhive.business.service.BusinessMembershipService;
+import com.bhive.common.cache.CacheNames;
+import com.bhive.common.service.CacheInvalidationService;
 import com.bhive.common.util.TenantContext;
 import com.bhive.customer.repository.CustomerProfileRepository;
 import com.bhive.customer.repository.BusinessCustomerRepository;
@@ -20,6 +22,8 @@ import com.bhive.loyalty.repository.LoyaltyProgramSettingsRepository;
 import com.bhive.loyalty.repository.LoyaltyRuleRepository;
 import com.bhive.loyalty.service.LoyaltyService;
 import java.util.List;
+
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.annotation.Transactional;
@@ -28,167 +32,209 @@ import org.springframework.web.bind.annotation.*;
 @RestController
 @RequestMapping("/api/v1/businesses/{businessId}/loyalty")
 public class LoyaltyController {
-    private final LoyaltyRuleRepository ruleRepository;
-    private final LoyaltyLedgerRepository ledgerRepository;
-    private final LoyaltyProgramSettingsRepository settingsRepository;
-    private final LoyaltyService loyaltyService;
-    private final BusinessMembershipService businessMembershipService;
-    private final CustomerProfileRepository customerProfileRepository;
-    private final BusinessCustomerRepository businessCustomerRepository;
+	private final LoyaltyRuleRepository ruleRepository;
+	private final LoyaltyLedgerRepository ledgerRepository;
+	private final LoyaltyProgramSettingsRepository settingsRepository;
+	private final LoyaltyService loyaltyService;
+	private final BusinessMembershipService businessMembershipService;
+	private final CustomerProfileRepository customerProfileRepository;
+	private final BusinessCustomerRepository businessCustomerRepository;
+	private final CacheInvalidationService cacheInvalidationService;
 
-    public LoyaltyController(LoyaltyRuleRepository ruleRepository, LoyaltyLedgerRepository ledgerRepository,
-                             LoyaltyProgramSettingsRepository settingsRepository, LoyaltyService loyaltyService,
-                             BusinessMembershipService businessMembershipService,
-                             CustomerProfileRepository customerProfileRepository,
-                             BusinessCustomerRepository businessCustomerRepository) {
-        this.ruleRepository = ruleRepository;
-        this.ledgerRepository = ledgerRepository;
-        this.settingsRepository = settingsRepository;
-        this.loyaltyService = loyaltyService;
-        this.businessMembershipService = businessMembershipService;
-        this.customerProfileRepository = customerProfileRepository;
-        this.businessCustomerRepository = businessCustomerRepository;
-    }
+	public LoyaltyController(LoyaltyRuleRepository ruleRepository, LoyaltyLedgerRepository ledgerRepository,
+			LoyaltyProgramSettingsRepository settingsRepository, LoyaltyService loyaltyService,
+			BusinessMembershipService businessMembershipService, CustomerProfileRepository customerProfileRepository,
+			BusinessCustomerRepository businessCustomerRepository, CacheInvalidationService cacheInvalidationService) {
+		this.ruleRepository = ruleRepository;
+		this.ledgerRepository = ledgerRepository;
+		this.settingsRepository = settingsRepository;
+		this.loyaltyService = loyaltyService;
+		this.businessMembershipService = businessMembershipService;
+		this.customerProfileRepository = customerProfileRepository;
+		this.businessCustomerRepository = businessCustomerRepository;
+		this.cacheInvalidationService = cacheInvalidationService;
+	}
 
-    @GetMapping("/settings")
-    public ResponseEntity<LoyaltySettingsResponse> getSettings(@PathVariable Long businessId) {
-        if (!canManage(businessId) && !customerCanAccessBusiness(businessId)) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
-        }
-        return ResponseEntity.ok(settingsRepository.findByTenantIdAndBusinessId(tenantId(), businessId)
-            .map(LoyaltySettingsResponse::from)
-            .orElseGet(() -> LoyaltySettingsResponse.unconfigured(businessId)));
-    }
+	@GetMapping("/settings")
+	public ResponseEntity<LoyaltySettingsResponse> getSettings(@PathVariable Long businessId) {
+		if (!canManage(businessId) && !customerCanAccessBusiness(businessId)) {
+			return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+		}
+		return ResponseEntity.ok(settingsRepository.findByTenantIdAndBusinessId(tenantId(), businessId)
+				.map(LoyaltySettingsResponse::from).orElseGet(() -> LoyaltySettingsResponse.unconfigured(businessId)));
+	}
 
-    @PutMapping("/settings")
-    public ResponseEntity<LoyaltySettingsResponse> saveSettings(@PathVariable Long businessId,
-                                                                 @RequestBody LoyaltySettingsRequest request) {
-        if (!canManage(businessId)) return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
-        if (request == null || request.pointsPerCurrencyUnit() == null || request.pointsPerCurrencyUnit() <= 0
-            || request.maxRedemptionPercent() == null || request.maxRedemptionPercent().signum() <= 0
-            || request.maxRedemptionPercent().compareTo(java.math.BigDecimal.valueOf(100)) > 0
-            || request.maxRedemptionPercent().scale() > 2
-            || (request.invoiceEarningMode() == null) != (request.invoiceEarningValue() == null)
-            || (request.invoiceEarningMode() != null && (request.invoiceEarningValue().signum() <= 0
-                || request.invoiceEarningValue().scale() > 2
-                || (request.invoiceEarningMode() == InvoiceEarningMode.PERCENTAGE
-                    && request.invoiceEarningValue().compareTo(java.math.BigDecimal.valueOf(100)) > 0)
-                || (request.invoiceEarningMode() == InvoiceEarningMode.FIXED_POINTS
-                    && (request.invoiceEarningValue().stripTrailingZeros().scale() > 0
-                        || request.invoiceEarningValue().compareTo(java.math.BigDecimal.valueOf(Integer.MAX_VALUE)) > 0))))) {
-            return ResponseEntity.badRequest().build();
-        }
-        var settings = settingsRepository.findByTenantIdAndBusinessId(tenantId(), businessId)
-            .orElseGet(com.bhive.loyalty.entity.LoyaltyProgramSettings::new);
-        settings.setTenantId(tenantId());
-        settings.setBusinessId(businessId);
-        settings.setPointsPerCurrencyUnit(request.pointsPerCurrencyUnit());
-        settings.setMaxRedemptionPercent(request.maxRedemptionPercent());
-        settings.setInvoiceEarningMode(request.invoiceEarningMode());
-        settings.setInvoiceEarningValue(request.invoiceEarningValue());
-        return ResponseEntity.ok(LoyaltySettingsResponse.from(settingsRepository.save(settings)));
-    }
+	@PutMapping("/settings")
+	public ResponseEntity<LoyaltySettingsResponse> saveSettings(@PathVariable Long businessId,
+			@RequestBody LoyaltySettingsRequest request) {
+		if (!canManage(businessId))
+			return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+		if (request == null || request.pointsPerCurrencyUnit() == null || request.pointsPerCurrencyUnit() <= 0
+				|| request.maxRedemptionPercent() == null || request.maxRedemptionPercent().signum() <= 0
+				|| request.maxRedemptionPercent().compareTo(java.math.BigDecimal.valueOf(100)) > 0
+				|| request.maxRedemptionPercent().scale() > 2
+				|| (request.invoiceEarningMode() == null) != (request.invoiceEarningValue() == null)
+				|| (request.invoiceEarningMode() != null && (request.invoiceEarningValue().signum() <= 0
+						|| request.invoiceEarningValue().scale() > 2
+						|| (request.invoiceEarningMode() == InvoiceEarningMode.PERCENTAGE
+								&& request.invoiceEarningValue().compareTo(java.math.BigDecimal.valueOf(100)) > 0)
+						|| (request.invoiceEarningMode() == InvoiceEarningMode.FIXED_POINTS
+								&& (request.invoiceEarningValue().stripTrailingZeros().scale() > 0
+										|| request.invoiceEarningValue()
+												.compareTo(java.math.BigDecimal.valueOf(Integer.MAX_VALUE)) > 0))))) {
+			return ResponseEntity.badRequest().build();
+		}
+		var settings = settingsRepository.findByTenantIdAndBusinessId(tenantId(), businessId)
+				.orElseGet(com.bhive.loyalty.entity.LoyaltyProgramSettings::new);
+		settings.setTenantId(tenantId());
+		settings.setBusinessId(businessId);
+		settings.setPointsPerCurrencyUnit(request.pointsPerCurrencyUnit());
+		settings.setMaxRedemptionPercent(request.maxRedemptionPercent());
+		settings.setInvoiceEarningMode(request.invoiceEarningMode());
+		settings.setInvoiceEarningValue(request.invoiceEarningValue());
+		return ResponseEntity.ok(LoyaltySettingsResponse.from(settingsRepository.save(settings)));
+	}
 
-    @GetMapping("/rules")
-    public ResponseEntity<List<LoyaltyRule>> getRules(@PathVariable Long businessId) {
-        if (!canManage(businessId)) return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
-        return ResponseEntity.ok(ruleRepository.findByTenantIdAndBusinessIdOrderByTargetTypeAscTargetIdAsc(tenantId(), businessId));
-    }
+	@GetMapping("/rules")
+	@Cacheable(cacheNames = CacheNames.LOYALTY_RULES, key = "T(com.bhive.common.util.TenantContext).getTenantId() + ':' + "
+			+ "T(com.bhive.common.util.TenantContext).getUserId() + ':' + "
+			+ "#businessId", unless = "#result == null || !#result.statusCode.is2xxSuccessful()")
 
-    @PostMapping("/rules")
-    public ResponseEntity<LoyaltyRule> createRule(@PathVariable Long businessId, @RequestBody LoyaltyRuleRequest request) {
-        if (!canManage(businessId)) return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
-        if (request == null || request.targetType() == null || request.targetId() == null || request.points() == null || request.points() <= 0) {
-            return ResponseEntity.badRequest().build();
-        }
-        loyaltyService.validateRuleTarget(tenantId(), businessId, request.targetType(), request.targetId());
-        if (ruleRepository.findByTenantIdAndBusinessIdAndTargetTypeAndTargetId(tenantId(), businessId, request.targetType(), request.targetId()).isPresent()) {
-            return ResponseEntity.status(HttpStatus.CONFLICT).build();
-        }
-        LoyaltyRule rule = new LoyaltyRule();
-        apply(rule, businessId, request);
-        return ResponseEntity.status(HttpStatus.CREATED).body(ruleRepository.save(rule));
-    }
+	public ResponseEntity<List<LoyaltyRule>> getRules(@PathVariable Long businessId) {
+		if (!canManage(businessId))
+			return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+		return ResponseEntity
+				.ok(ruleRepository.findByTenantIdAndBusinessIdOrderByTargetTypeAscTargetIdAsc(tenantId(), businessId));
+	}
 
-    @PutMapping("/rules/{ruleId}")
-    public ResponseEntity<LoyaltyRule> updateRule(@PathVariable Long businessId, @PathVariable Long ruleId,
-                                                   @RequestBody LoyaltyRuleRequest request) {
-        if (!canManage(businessId)) return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
-        if (request == null || request.targetType() == null || request.targetId() == null || request.points() == null || request.points() <= 0) {
-            return ResponseEntity.badRequest().build();
-        }
-        loyaltyService.validateRuleTarget(tenantId(), businessId, request.targetType(), request.targetId());
-        return ruleRepository.findByIdAndTenantIdAndBusinessId(ruleId, tenantId(), businessId)
-            .map(rule -> { apply(rule, businessId, request); return ResponseEntity.ok(ruleRepository.save(rule)); })
-            .orElse(ResponseEntity.notFound().build());
-    }
+	@PostMapping("/rules")
+	public ResponseEntity<LoyaltyRule> createRule(@PathVariable Long businessId,
+			@RequestBody LoyaltyRuleRequest request) {
+		if (!canManage(businessId))
+			return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+		if (request == null || request.targetType() == null || request.targetId() == null || request.points() == null
+				|| request.points() <= 0) {
+			return ResponseEntity.badRequest().build();
+		}
+		loyaltyService.validateRuleTarget(tenantId(), businessId, request.targetType(), request.targetId());
+		if (ruleRepository.findByTenantIdAndBusinessIdAndTargetTypeAndTargetId(tenantId(), businessId,
+				request.targetType(), request.targetId()).isPresent()) {
+			return ResponseEntity.status(HttpStatus.CONFLICT).build();
+		}
+		LoyaltyRule rule = new LoyaltyRule();
+		apply(rule, businessId, request);
+		LoyaltyRule savedRule = ruleRepository.save(rule);
 
-    @GetMapping("/customers/{customerId}/balance")
-    public ResponseEntity<LoyaltyBalanceResponse> getBalance(@PathVariable Long businessId, @PathVariable Long customerId) {
-        if (!canManage(businessId) && !customerCanView(customerId, businessId)) return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
-        long balance = ledgerRepository.getBalance(tenantId(), businessId, customerId);
-        return ResponseEntity.ok(new LoyaltyBalanceResponse(businessId, customerId, balance));
-    }
+		cacheInvalidationService.evictLoyaltyRuleCaches();
 
-    @GetMapping("/balances")
-    public ResponseEntity<List<LoyaltyCustomerBalanceResponse>> getCustomerBalances(@PathVariable Long businessId) {
-        if (!canManage(businessId)) return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
-        return ResponseEntity.ok(ledgerRepository.getBalances(tenantId(), businessId));
-    }
+		return ResponseEntity.status(HttpStatus.CREATED).body(savedRule);
+	}
 
-    @PostMapping("/customers/{customerId}/earn")
-    @Transactional
-    public ResponseEntity<LoyaltyLedgerEntry> earn(@PathVariable Long businessId, @PathVariable Long customerId,
-                                                    @RequestBody LoyaltyTransactionRequest request) {
-        if (!canManage(businessId)) return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
-        LoyaltyTransactionRequest normalized = new LoyaltyTransactionRequest(customerId,
-            request == null ? null : request.points(), request == null ? null : request.idempotencyKey(),
-            request == null ? null : request.referenceType(), request == null ? null : request.referenceId(),
-            request == null ? null : request.note());
-        return ResponseEntity.ok(loyaltyService.record(tenantId(), businessId, LoyaltyEntryType.EARN, normalized));
-    }
+	@PutMapping("/rules/{ruleId}")
+	public ResponseEntity<LoyaltyRule> updateRule(@PathVariable Long businessId, @PathVariable Long ruleId,
+			@RequestBody LoyaltyRuleRequest request) {
+		if (!canManage(businessId))
+			return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+		if (request == null || request.targetType() == null || request.targetId() == null || request.points() == null
+				|| request.points() <= 0) {
+			return ResponseEntity.badRequest().build();
+		}
+		loyaltyService.validateRuleTarget(tenantId(), businessId, request.targetType(), request.targetId());
+		return ruleRepository.findByIdAndTenantIdAndBusinessId(ruleId, tenantId(), businessId).map(rule -> {
+			apply(rule, businessId, request);
 
-    @PostMapping("/customers/{customerId}/earn-for-target")
-    @Transactional
-    public ResponseEntity<LoyaltyLedgerEntry> earnForTarget(@PathVariable Long businessId, @PathVariable Long customerId,
-                                                             @RequestBody LoyaltyTargetTransactionRequest request) {
-        if (!canManage(businessId)) return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
-        return ResponseEntity.ok(loyaltyService.awardForTarget(tenantId(), businessId, customerId, request));
-    }
+			LoyaltyRule savedRule = ruleRepository.save(rule);
 
-    private void apply(LoyaltyRule rule, Long businessId, LoyaltyRuleRequest request) {
-        rule.setTenantId(tenantId());
-        rule.setBusinessId(businessId);
-        rule.setTargetType(request.targetType());
-        rule.setTargetId(request.targetId());
-        rule.setPoints(request.points());
-        rule.setActive(request.active());
-    }
+			cacheInvalidationService.evictLoyaltyRuleCaches();
 
-    private boolean canManage(Long businessId) {
-        return tenantId() != null && userId() != null
-            && businessMembershipService.userHasAccessToBusiness(userId(), businessId, tenantId());
-    }
+			return ResponseEntity.ok(savedRule);
+		}).orElse(ResponseEntity.notFound().build());
+	}
 
-    private boolean customerCanView(Long customerId, Long businessId) {
-        return tenantId() != null && userId() != null
-            && customerProfileRepository.findById(customerId)
-                .filter(profile -> tenantId().equals(profile.getTenantId()) && userId().equals(profile.getUserId()))
-                .filter(profile -> businessCustomerRepository.findByBusinessIdAndCustomerProfileId(businessId, profile.getId())
-                    .filter(link -> tenantId().equals(link.getTenantId()) && "ACTIVE".equalsIgnoreCase(link.getStatus()))
-                    .isPresent())
-                .isPresent();
-    }
+	@GetMapping("/customers/{customerId}/balance")
+	public ResponseEntity<LoyaltyBalanceResponse> getBalance(@PathVariable Long businessId,
+			@PathVariable Long customerId) {
+		if (!canManage(businessId) && !customerCanView(customerId, businessId))
+			return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+		long balance = ledgerRepository.getBalance(tenantId(), businessId, customerId);
+		return ResponseEntity.ok(new LoyaltyBalanceResponse(businessId, customerId, balance));
+	}
 
-    private boolean customerCanAccessBusiness(Long businessId) {
-        if (tenantId() == null || userId() == null) return false;
-        return customerProfileRepository.findByUserIdAndTenantId(userId(), tenantId())
-            .filter(profile -> businessCustomerRepository.findByBusinessIdAndCustomerProfileId(businessId, profile.getId())
-                .filter(link -> tenantId().equals(link.getTenantId()) && "ACTIVE".equalsIgnoreCase(link.getStatus()))
-                .isPresent())
-            .isPresent();
-    }
+	@GetMapping("/balances")
+	public ResponseEntity<List<LoyaltyCustomerBalanceResponse>> getCustomerBalances(@PathVariable Long businessId) {
+		if (!canManage(businessId))
+			return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+		return ResponseEntity.ok(ledgerRepository.getBalances(tenantId(), businessId));
+	}
 
-    private Long tenantId() { return TenantContext.getTenantId(); }
-    private Long userId() { return TenantContext.getUserId(); }
+	@PostMapping("/customers/{customerId}/earn")
+	@Transactional
+	public ResponseEntity<LoyaltyLedgerEntry> earn(@PathVariable Long businessId, @PathVariable Long customerId,
+			@RequestBody LoyaltyTransactionRequest request) {
+		if (!canManage(businessId))
+			return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+		LoyaltyTransactionRequest normalized = new LoyaltyTransactionRequest(customerId,
+				request == null ? null : request.points(), request == null ? null : request.idempotencyKey(),
+				request == null ? null : request.referenceType(), request == null ? null : request.referenceId(),
+				request == null ? null : request.note());
+		return ResponseEntity.ok(loyaltyService.record(tenantId(), businessId, LoyaltyEntryType.EARN, normalized));
+	}
+
+	@PostMapping("/customers/{customerId}/earn-for-target")
+	@Transactional
+	public ResponseEntity<LoyaltyLedgerEntry> earnForTarget(@PathVariable Long businessId,
+			@PathVariable Long customerId, @RequestBody LoyaltyTargetTransactionRequest request) {
+		if (!canManage(businessId))
+			return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+		return ResponseEntity.ok(loyaltyService.awardForTarget(tenantId(), businessId, customerId, request));
+	}
+
+	private void apply(LoyaltyRule rule, Long businessId, LoyaltyRuleRequest request) {
+		rule.setTenantId(tenantId());
+		rule.setBusinessId(businessId);
+		rule.setTargetType(request.targetType());
+		rule.setTargetId(request.targetId());
+		rule.setPoints(request.points());
+		rule.setActive(request.active());
+	}
+
+	private boolean canManage(Long businessId) {
+		return tenantId() != null && userId() != null
+				&& businessMembershipService.userHasAccessToBusiness(userId(), businessId, tenantId());
+	}
+
+	private boolean customerCanView(Long customerId, Long businessId) {
+		return tenantId() != null && userId() != null
+				&& customerProfileRepository.findById(customerId)
+						.filter(profile -> tenantId().equals(profile.getTenantId())
+								&& userId().equals(profile.getUserId()))
+						.filter(profile -> businessCustomerRepository
+								.findByBusinessIdAndCustomerProfileId(businessId, profile.getId())
+								.filter(link -> tenantId().equals(link.getTenantId())
+										&& "ACTIVE".equalsIgnoreCase(link.getStatus()))
+								.isPresent())
+						.isPresent();
+	}
+
+	private boolean customerCanAccessBusiness(Long businessId) {
+		if (tenantId() == null || userId() == null)
+			return false;
+		return customerProfileRepository
+				.findByUserIdAndTenantId(userId(),
+						tenantId())
+				.filter(profile -> businessCustomerRepository
+						.findByBusinessIdAndCustomerProfileId(businessId, profile.getId())
+						.filter(link -> tenantId().equals(link.getTenantId())
+								&& "ACTIVE".equalsIgnoreCase(link.getStatus()))
+						.isPresent())
+				.isPresent();
+	}
+
+	private Long tenantId() {
+		return TenantContext.getTenantId();
+	}
+
+	private Long userId() {
+		return TenantContext.getUserId();
+	}
 }

@@ -5,6 +5,7 @@ import com.bhive.appointment.repository.AppointmentServiceRepository;
 import com.bhive.business.entity.Business;
 import com.bhive.business.repository.BusinessRepository;
 import com.bhive.business.service.BusinessMembershipService;
+import com.bhive.common.cache.CacheNames;
 import com.bhive.common.util.TenantContext;
 import com.bhive.customer.entity.BusinessCustomer;
 import com.bhive.customer.repository.BusinessCustomerRepository;
@@ -15,6 +16,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
+
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.annotation.Transactional;
@@ -30,219 +33,197 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1")
 public class AppointmentConfigurationController {
 
-    private final AppointmentServiceRepository appointmentServiceRepository;
-    private final BusinessRepository businessRepository;
-    private final BusinessMembershipService businessMembershipService;
-    private final BusinessCustomerRepository businessCustomerRepository;
-    private final CustomerProfileRepository customerProfileRepository;
+	private final AppointmentServiceRepository appointmentServiceRepository;
+	private final BusinessRepository businessRepository;
+	private final BusinessMembershipService businessMembershipService;
+	private final BusinessCustomerRepository businessCustomerRepository;
+	private final CustomerProfileRepository customerProfileRepository;
 
-    public AppointmentConfigurationController(AppointmentServiceRepository appointmentServiceRepository,
-                                              BusinessRepository businessRepository,
-                                              BusinessMembershipService businessMembershipService,
-                                              BusinessCustomerRepository businessCustomerRepository,
-                                              CustomerProfileRepository customerProfileRepository) {
-        this.appointmentServiceRepository = appointmentServiceRepository;
-        this.businessRepository = businessRepository;
-        this.businessMembershipService = businessMembershipService;
-        this.businessCustomerRepository = businessCustomerRepository;
-        this.customerProfileRepository = customerProfileRepository;
-    }
+	public AppointmentConfigurationController(AppointmentServiceRepository appointmentServiceRepository,
+			BusinessRepository businessRepository, BusinessMembershipService businessMembershipService,
+			BusinessCustomerRepository businessCustomerRepository,
+			CustomerProfileRepository customerProfileRepository) {
+		this.appointmentServiceRepository = appointmentServiceRepository;
+		this.businessRepository = businessRepository;
+		this.businessMembershipService = businessMembershipService;
+		this.businessCustomerRepository = businessCustomerRepository;
+		this.customerProfileRepository = customerProfileRepository;
+	}
 
-    @PutMapping("/businesses/{businessId}/appointments-enabled")
-    public ResponseEntity<?> setAppointmentsEnabled(@PathVariable Long businessId, @RequestParam boolean enabled) {
-        Long tenantId = TenantContext.getTenantId();
-        Long userId = TenantContext.getUserId();
-        if (tenantId == null || userId == null) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
-        }
+	@PutMapping("/businesses/{businessId}/appointments-enabled")
+	public ResponseEntity<?> setAppointmentsEnabled(@PathVariable Long businessId, @RequestParam boolean enabled) {
+		Long tenantId = TenantContext.getTenantId();
+		Long userId = TenantContext.getUserId();
+		if (tenantId == null || userId == null) {
+			return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+		}
 
-        return businessRepository.findById(businessId)
-            .filter(business -> tenantId.equals(business.getTenantId()))
-            .filter(business -> businessMembershipService.userHasAccessToBusiness(userId, businessId, tenantId))
-            .map(business -> {
-                if (enabled && appointmentServiceRepository
-                    .findByTenantIdAndBusinessIdAndEnabledTrueOrderByNameAsc(tenantId, businessId).isEmpty()) {
-                    return ResponseEntity.badRequest().body(Map.of(
-                        "message", "Add and save at least one active service before enabling appointments."
-                    ));
-                }
-                business.setAppointmentsEnabled(enabled);
-                return ResponseEntity.ok(businessRepository.save(business));
-            })
-            .orElse(ResponseEntity.status(HttpStatus.FORBIDDEN).build());
-    }
+		return businessRepository.findById(businessId).filter(business -> tenantId.equals(business.getTenantId()))
+				.filter(business -> businessMembershipService.userHasAccessToBusiness(userId, businessId, tenantId))
+				.map(business -> {
+					if (enabled && appointmentServiceRepository
+							.findByTenantIdAndBusinessIdAndEnabledTrueOrderByNameAsc(tenantId, businessId).isEmpty()) {
+						return ResponseEntity.badRequest().body(Map.of("message",
+								"Add and save at least one active service before enabling appointments."));
+					}
+					business.setAppointmentsEnabled(enabled);
+					return ResponseEntity.ok(businessRepository.save(business));
+				}).orElse(ResponseEntity.status(HttpStatus.FORBIDDEN).build());
+	}
 
-    @PutMapping("/businesses/{businessId}/home-services-enabled")
-    public ResponseEntity<?> setHomeServicesEnabled(@PathVariable Long businessId, @RequestParam boolean enabled) {
-        Long tenantId = TenantContext.getTenantId();
-        Long userId = TenantContext.getUserId();
-        if (tenantId == null || userId == null) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
-        }
+	@PutMapping("/businesses/{businessId}/home-services-enabled")
+	public ResponseEntity<?> setHomeServicesEnabled(@PathVariable Long businessId, @RequestParam boolean enabled) {
+		Long tenantId = TenantContext.getTenantId();
+		Long userId = TenantContext.getUserId();
+		if (tenantId == null || userId == null) {
+			return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+		}
 
-        return businessRepository.findById(businessId)
-            .filter(business -> tenantId.equals(business.getTenantId()))
-            .filter(business -> businessMembershipService.userHasAccessToBusiness(userId, businessId, tenantId))
-            .map(business -> {
-                if (enabled && !business.isAppointmentsEnabled()) {
-                    return ResponseEntity.badRequest().body(Map.of(
-                        "message", "Enable appointments before offering home services."
-                    ));
-                }
-                business.setHomeServicesEnabled(enabled);
-                return ResponseEntity.ok(businessRepository.save(business));
-            })
-            .orElse(ResponseEntity.status(HttpStatus.FORBIDDEN).build());
-    }
+		return businessRepository.findById(businessId).filter(business -> tenantId.equals(business.getTenantId()))
+				.filter(business -> businessMembershipService.userHasAccessToBusiness(userId, businessId, tenantId))
+				.map(business -> {
+					if (enabled && !business.isAppointmentsEnabled()) {
+						return ResponseEntity.badRequest()
+								.body(Map.of("message", "Enable appointments before offering home services."));
+					}
+					business.setHomeServicesEnabled(enabled);
+					return ResponseEntity.ok(businessRepository.save(business));
+				}).orElse(ResponseEntity.status(HttpStatus.FORBIDDEN).build());
+	}
 
-    @PutMapping("/businesses/{businessId}/home-visit-charge")
-    public ResponseEntity<?> setHomeVisitCharge(@PathVariable Long businessId, @RequestParam java.math.BigDecimal charge) {
-        Long tenantId = TenantContext.getTenantId();
-        Long userId = TenantContext.getUserId();
-        if (tenantId == null || userId == null) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
-        }
-        if (charge == null || charge.signum() < 0 || charge.compareTo(new java.math.BigDecimal("1000000")) > 0) {
-            return ResponseEntity.badRequest().body(Map.of("message", "Enter a visiting charge between 0 and 1,000,000."));
-        }
+	@PutMapping("/businesses/{businessId}/home-visit-charge")
+	public ResponseEntity<?> setHomeVisitCharge(@PathVariable Long businessId,
+			@RequestParam java.math.BigDecimal charge) {
+		Long tenantId = TenantContext.getTenantId();
+		Long userId = TenantContext.getUserId();
+		if (tenantId == null || userId == null) {
+			return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+		}
+		if (charge == null || charge.signum() < 0 || charge.compareTo(new java.math.BigDecimal("1000000")) > 0) {
+			return ResponseEntity.badRequest()
+					.body(Map.of("message", "Enter a visiting charge between 0 and 1,000,000."));
+		}
 
-        return businessRepository.findById(businessId)
-            .filter(business -> tenantId.equals(business.getTenantId()))
-            .filter(business -> businessMembershipService.userHasAccessToBusiness(userId, businessId, tenantId))
-            .map(business -> {
-                business.setHomeVisitCharge(charge.setScale(2, java.math.RoundingMode.HALF_UP));
-                return ResponseEntity.ok(businessRepository.save(business));
-            })
-            .orElse(ResponseEntity.status(HttpStatus.FORBIDDEN).build());
-    }
+		return businessRepository.findById(businessId).filter(business -> tenantId.equals(business.getTenantId()))
+				.filter(business -> businessMembershipService.userHasAccessToBusiness(userId, businessId, tenantId))
+				.map(business -> {
+					business.setHomeVisitCharge(charge.setScale(2, java.math.RoundingMode.HALF_UP));
+					return ResponseEntity.ok(businessRepository.save(business));
+				}).orElse(ResponseEntity.status(HttpStatus.FORBIDDEN).build());
+	}
 
-    @PutMapping("/businesses/{businessId}/memberships-enabled")
-    public ResponseEntity<?> setMembershipsEnabled(@PathVariable Long businessId, @RequestParam boolean enabled) {
-        Long tenantId = TenantContext.getTenantId();
-        Long userId = TenantContext.getUserId();
-        if (tenantId == null || userId == null) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
-        }
+	@PutMapping("/businesses/{businessId}/memberships-enabled")
+	public ResponseEntity<?> setMembershipsEnabled(@PathVariable Long businessId, @RequestParam boolean enabled) {
+		Long tenantId = TenantContext.getTenantId();
+		Long userId = TenantContext.getUserId();
+		if (tenantId == null || userId == null) {
+			return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+		}
 
-        return businessRepository.findById(businessId)
-            .filter(business -> tenantId.equals(business.getTenantId()))
-            .filter(business -> businessMembershipService.userHasAccessToBusiness(userId, businessId, tenantId))
-            .map(business -> {
-                business.setMembershipsEnabled(enabled);
-                return ResponseEntity.ok(businessRepository.save(business));
-            })
-            .orElse(ResponseEntity.status(HttpStatus.FORBIDDEN).build());
-    }
+		return businessRepository.findById(businessId).filter(business -> tenantId.equals(business.getTenantId()))
+				.filter(business -> businessMembershipService.userHasAccessToBusiness(userId, businessId, tenantId))
+				.map(business -> {
+					business.setMembershipsEnabled(enabled);
+					return ResponseEntity.ok(businessRepository.save(business));
+				}).orElse(ResponseEntity.status(HttpStatus.FORBIDDEN).build());
+	}
 
-    @GetMapping("/appointment-services")
-    public ResponseEntity<List<AppointmentService>> getAppointmentServices(@RequestParam Long businessId) {
-        Long tenantId = TenantContext.getTenantId();
-        Long userId = TenantContext.getUserId();
-        if (tenantId == null || userId == null) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
-        }
+	@GetMapping("/appointment-services")
+	@Cacheable(cacheNames = CacheNames.APPOINTMENT_SERVICES, key = "T(com.bhive.common.context.TenantContext).getTenantId() + ':' + "
+			+ "T(com.bhive.common.context.TenantContext).getUserId() + ':' + "
+			+ "#businessId", unless = "#result == null || !#result.statusCode.is2xxSuccessful() || #result.body.isEmpty()")
+	public ResponseEntity<List<AppointmentService>> getAppointmentServices(@RequestParam Long businessId) {
+		Long tenantId = TenantContext.getTenantId();
+		Long userId = TenantContext.getUserId();
+		if (tenantId == null || userId == null) {
+			return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+		}
 
-        return businessRepository.findById(businessId)
-            .filter(business -> tenantId.equals(business.getTenantId()))
-            .map(business -> {
-                boolean businessUser = businessMembershipService.userHasAccessToBusiness(userId, businessId, tenantId);
-                if (businessUser) {
-                    return ResponseEntity.ok(appointmentServiceRepository.findByTenantIdAndBusinessIdOrderByNameAsc(tenantId, businessId));
-                }
-                if (!business.isAppointmentsEnabled() || !isLinkedCustomer(tenantId, businessId, userId)) {
-                    return ResponseEntity.ok(List.<AppointmentService>of());
-                }
-                return ResponseEntity.ok(appointmentServiceRepository.findByTenantIdAndBusinessIdAndEnabledTrueOrderByNameAsc(tenantId, businessId));
-            })
-            .orElse(ResponseEntity.status(HttpStatus.FORBIDDEN).build());
-    }
+		return businessRepository.findById(businessId).filter(business -> tenantId.equals(business.getTenantId()))
+				.map(business -> {
+					boolean businessUser = businessMembershipService.userHasAccessToBusiness(userId, businessId,
+							tenantId);
+					if (businessUser) {
+						return ResponseEntity.ok(appointmentServiceRepository
+								.findByTenantIdAndBusinessIdOrderByNameAsc(tenantId, businessId));
+					}
+					if (!business.isAppointmentsEnabled() || !isLinkedCustomer(tenantId, businessId, userId)) {
+						return ResponseEntity.ok(List.<AppointmentService>of());
+					}
+					return ResponseEntity.ok(appointmentServiceRepository
+							.findByTenantIdAndBusinessIdAndEnabledTrueOrderByNameAsc(tenantId, businessId));
+				}).orElse(ResponseEntity.status(HttpStatus.FORBIDDEN).build());
+	}
 
-    @PutMapping("/businesses/{businessId}/appointment-services")
-    @Transactional
-    public ResponseEntity<List<AppointmentService>> saveAppointmentServices(
-        @PathVariable Long businessId,
-        @RequestBody List<AppointmentServiceRequest> requests
-    ) {
-        Long tenantId = TenantContext.getTenantId();
-        Long userId = TenantContext.getUserId();
-        if (tenantId == null || userId == null || requests == null || requests.size() > 50) {
-            return ResponseEntity.badRequest().build();
-        }
+	@PutMapping("/businesses/{businessId}/appointment-services")
+	@Transactional
+	public ResponseEntity<List<AppointmentService>> saveAppointmentServices(@PathVariable Long businessId,
+			@RequestBody List<AppointmentServiceRequest> requests) {
+		Long tenantId = TenantContext.getTenantId();
+		Long userId = TenantContext.getUserId();
+		if (tenantId == null || userId == null || requests == null || requests.size() > 50) {
+			return ResponseEntity.badRequest().build();
+		}
 
-        Business business = businessRepository.findById(businessId)
-            .filter(candidate -> tenantId.equals(candidate.getTenantId()))
-            .orElse(null);
-        if (business == null || !businessMembershipService.userHasAccessToBusiness(userId, businessId, tenantId)) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
-        }
+		Business business = businessRepository.findById(businessId)
+				.filter(candidate -> tenantId.equals(candidate.getTenantId())).orElse(null);
+		if (business == null || !businessMembershipService.userHasAccessToBusiness(userId, businessId, tenantId)) {
+			return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+		}
 
-        Set<Long> requestedIds = new HashSet<>();
-        for (AppointmentServiceRequest request : requests) {
-            if (!isValid(request) || (request.id() != null && !requestedIds.add(request.id()))) {
-                return ResponseEntity.badRequest().build();
-            }
-        }
+		Set<Long> requestedIds = new HashSet<>();
+		for (AppointmentServiceRequest request : requests) {
+			if (!isValid(request) || (request.id() != null && !requestedIds.add(request.id()))) {
+				return ResponseEntity.badRequest().build();
+			}
+		}
 
-        List<AppointmentService> current = appointmentServiceRepository
-            .findByTenantIdAndBusinessIdOrderByNameAsc(tenantId, businessId);
-        Map<Long, AppointmentService> currentById = current.stream()
-            .collect(Collectors.toMap(AppointmentService::getId, service -> service));
-        if (requestedIds.stream().anyMatch(id -> !currentById.containsKey(id))) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
-        }
+		List<AppointmentService> current = appointmentServiceRepository
+				.findByTenantIdAndBusinessIdOrderByNameAsc(tenantId, businessId);
+		Map<Long, AppointmentService> currentById = current.stream()
+				.collect(Collectors.toMap(AppointmentService::getId, service -> service));
+		if (requestedIds.stream().anyMatch(id -> !currentById.containsKey(id))) {
+			return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+		}
 
-        current.stream()
-            .filter(service -> !requestedIds.contains(service.getId()))
-            .forEach(service -> service.setEnabled(false));
+		current.stream().filter(service -> !requestedIds.contains(service.getId()))
+				.forEach(service -> service.setEnabled(false));
 
-        for (AppointmentServiceRequest request : requests) {
-            AppointmentService service = request.id() == null
-                ? new AppointmentService()
-                : currentById.get(request.id());
-            service.setTenantId(tenantId);
-            service.setBusinessId(businessId);
-            service.setName(request.name().trim());
-            service.setDescription(request.description() == null ? null : request.description().trim());
-            service.setPrice(request.price());
-            service.setDurationMinutes(request.durationMinutes());
-            service.setEnabled(request.enabled());
-            appointmentServiceRepository.save(service);
-        }
+		for (AppointmentServiceRequest request : requests) {
+			AppointmentService service = request.id() == null ? new AppointmentService()
+					: currentById.get(request.id());
+			service.setTenantId(tenantId);
+			service.setBusinessId(businessId);
+			service.setName(request.name().trim());
+			service.setDescription(request.description() == null ? null : request.description().trim());
+			service.setPrice(request.price());
+			service.setDurationMinutes(request.durationMinutes());
+			service.setEnabled(request.enabled());
+			appointmentServiceRepository.save(service);
+		}
 
-        return ResponseEntity.ok(appointmentServiceRepository
-            .findByTenantIdAndBusinessIdOrderByNameAsc(tenantId, businessId));
-    }
+		return ResponseEntity
+				.ok(appointmentServiceRepository.findByTenantIdAndBusinessIdOrderByNameAsc(tenantId, businessId));
+	}
 
-    private boolean isLinkedCustomer(Long tenantId, Long businessId, Long userId) {
-        Long customerId = customerProfileRepository.findByUserIdAndTenantId(userId, tenantId)
-            .map(com.bhive.customer.entity.CustomerProfile::getId)
-            .orElse(null);
-        return customerId != null && businessCustomerRepository.findByTenantIdAndBusinessId(tenantId, businessId).stream()
-            .filter(link -> "ACTIVE".equalsIgnoreCase(link.getStatus()))
-            .map(BusinessCustomer::getCustomerProfileId)
-            .anyMatch(customerId::equals);
-    }
+	private boolean isLinkedCustomer(Long tenantId, Long businessId, Long userId) {
+		Long customerId = customerProfileRepository.findByUserIdAndTenantId(userId, tenantId)
+				.map(com.bhive.customer.entity.CustomerProfile::getId).orElse(null);
+		return customerId != null && businessCustomerRepository.findByTenantIdAndBusinessId(tenantId, businessId)
+				.stream().filter(link -> "ACTIVE".equalsIgnoreCase(link.getStatus()))
+				.map(BusinessCustomer::getCustomerProfileId).anyMatch(customerId::equals);
+	}
 
-    private boolean isValid(AppointmentServiceRequest request) {
-        return request != null
-            && request.name() != null
-            && !request.name().isBlank()
-            && request.name().trim().length() <= 120
-            && (request.description() == null || request.description().length() <= 500)
-            && request.price() != null
-            && request.price().compareTo(BigDecimal.ZERO) >= 0
-            && request.price().scale() <= 2
-            && request.durationMinutes() != null
-            && request.durationMinutes() >= 5
-            && request.durationMinutes() <= 480;
-    }
+	private boolean isValid(AppointmentServiceRequest request) {
+		return request != null && request.name() != null && !request.name().isBlank()
+				&& request.name().trim().length() <= 120
+				&& (request.description() == null || request.description().length() <= 500) && request.price() != null
+				&& request.price().compareTo(BigDecimal.ZERO) >= 0 && request.price().scale() <= 2
+				&& request.durationMinutes() != null && request.durationMinutes() >= 5
+				&& request.durationMinutes() <= 480;
+	}
 
-    public record AppointmentServiceRequest(
-        Long id,
-        String name,
-        String description,
-        BigDecimal price,
-        Integer durationMinutes,
-        boolean enabled
-    ) { }
+	public record AppointmentServiceRequest(Long id, String name, String description, BigDecimal price,
+			Integer durationMinutes, boolean enabled) {
+	}
 }

@@ -6,13 +6,14 @@ import com.bhive.business.entity.Business;
 import com.bhive.business.entity.BusinessOffer;
 import com.bhive.business.entity.BusinessStatus;
 import com.bhive.business.entity.CustomerSegment;
-import com.bhive.business.entity.BusinessUser;
 import com.bhive.business.repository.BusinessOfferRepository;
 import com.bhive.business.repository.BusinessRepository;
 import com.bhive.business.repository.BusinessUserRepository;
 import com.bhive.billing.entity.Invoice;
 import com.bhive.billing.repository.InvoiceRepository;
 import com.bhive.common.util.TenantContext;
+import com.bhive.common.cache.CacheNames;
+import com.bhive.common.service.CacheInvalidationService;
 import com.bhive.common.service.S3ImageUploadService;
 import com.bhive.common.util.GeoUtils;
 import com.bhive.customer.entity.BusinessCustomer;
@@ -41,6 +42,8 @@ import java.util.Set;
 import java.util.HashSet;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -70,13 +73,14 @@ public class BusinessOfferController {
 	private final AppointmentRepository appointmentRepository;
 	private final NotificationService notificationService;
 	private final S3ImageUploadService s3ImageUploadService;
+	private final CacheInvalidationService cacheInvalidationService;
 
 	public BusinessOfferController(BusinessOfferRepository offerRepository, BusinessRepository businessRepository,
 			BusinessUserRepository businessUserRepository, BusinessCustomerRepository businessCustomerRepository,
 			CustomerProfileRepository customerProfileRepository, InvoiceRepository invoiceRepository,
 			PaymentRepository paymentRepository, MembershipRepository membershipRepository,
 			AppointmentRepository appointmentRepository, NotificationService notificationService,
-			S3ImageUploadService s3ImageUploadService) {
+			S3ImageUploadService s3ImageUploadService, CacheInvalidationService cacheInvalidationService) {
 		this.offerRepository = offerRepository;
 		this.businessRepository = businessRepository;
 		this.businessUserRepository = businessUserRepository;
@@ -88,9 +92,14 @@ public class BusinessOfferController {
 		this.appointmentRepository = appointmentRepository;
 		this.notificationService = notificationService;
 		this.s3ImageUploadService = s3ImageUploadService;
+		this.cacheInvalidationService = cacheInvalidationService;
 	}
 
 	@GetMapping("/offers/nearby")
+	@Cacheable(cacheNames = CacheNames.NEARBY_OFFERS, key = "T(java.lang.Math).round(#latitude * 1000.0) / 1000.0 + ':' + "
+			+ "T(java.lang.Math).round(#longitude * 1000.0) / 1000.0 + ':' + " + "#radiusKm + ':' + "
+			+ "T(java.time.LocalDateTime).now().truncatedTo(T(java.time.temporal.ChronoUnit).HOURS)", unless = "#result == null || !#result.statusCode.is2xxSuccessful() || #result.body.isEmpty()")
+
 	public ResponseEntity<List<NearbyOfferSummary>> getNearbyOffers(@RequestParam Double latitude,
 			@RequestParam Double longitude, @RequestParam(defaultValue = "25") double radiusKm) {
 		if (!GeoUtils.isValidCoordinates(latitude, longitude) || radiusKm <= 0 || radiusKm > 500) {
@@ -99,9 +108,8 @@ public class BusinessOfferController {
 
 		List<Business> nearbyBusinesses = businessRepository
 				.findByStatusAndLatitudeIsNotNullAndLongitudeIsNotNull(BusinessStatus.ACTIVE).stream()
-				.filter(Business::isProfileComplete)
-				.filter(business -> GeoUtils.distanceKm(latitude, longitude, business.getLatitude(),
-						business.getLongitude()) <= radiusKm)
+				.filter(Business::isProfileComplete).filter(business -> GeoUtils.distanceKm(latitude, longitude,
+						business.getLatitude(), business.getLongitude()) <= radiusKm)
 				.toList();
 		if (nearbyBusinesses.isEmpty())
 			return ResponseEntity.ok(List.of());
@@ -116,8 +124,7 @@ public class BusinessOfferController {
 					Business business = businessesById.get(offer.getBusinessId());
 					return new NearbyOfferSummary(offer.getId(), business.getId(), business.getName(),
 							business.getAddress(), offer.getTitle(), offer.getDescription(), offer.getDiscountLabel(),
-							offer.getEndsAt(), offer.getAttachmentUrl(),
-							offer.getAttachmentName(),
+							offer.getEndsAt(), offer.getAttachmentUrl(), offer.getAttachmentName(),
 							GeoUtils.distanceKm(latitude, longitude, business.getLatitude(), business.getLongitude()));
 				}).filter(offer -> offer.distanceKm() <= radiusKm)
 				.sorted(java.util.Comparator.comparingDouble(NearbyOfferSummary::distanceKm)).limit(100).toList();
@@ -179,6 +186,8 @@ public class BusinessOfferController {
 			}
 		}
 
+		cacheInvalidationService.evictOfferCaches();
+
 		notifyTargetedCustomers(saved, TenantContext.getUserId());
 		return ResponseEntity.status(HttpStatus.CREATED).body(saved);
 	}
@@ -191,6 +200,7 @@ public class BusinessOfferController {
 		return offerRepository.findByIdAndTenantIdAndBusinessId(offerId, tenantId, businessId).map(offer -> {
 			offer.setActive(false);
 			offerRepository.save(offer);
+			cacheInvalidationService.evictOfferCaches();
 			return ResponseEntity.noContent().<Void>build();
 		}).orElseGet(() -> ResponseEntity.notFound().build());
 	}
