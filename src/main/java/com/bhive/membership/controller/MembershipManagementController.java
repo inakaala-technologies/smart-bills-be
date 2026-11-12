@@ -9,6 +9,7 @@ import com.bhive.loyalty.service.LoyaltyService;
 import com.bhive.loyalty.entity.LoyaltyTargetType;
 import com.bhive.customer.entity.BusinessCustomer;
 import com.bhive.customer.entity.CustomerProfile;
+import com.bhive.customer.dto.CustomerProfileResponse;
 import com.bhive.customer.repository.BusinessCustomerRepository;
 import com.bhive.customer.repository.CustomerProfileRepository;
 import com.bhive.membership.dto.CreateMembershipRequest;
@@ -25,9 +26,14 @@ import com.bhive.membership.repository.MembershipRepository;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.annotation.Transactional;
@@ -119,17 +125,95 @@ public class MembershipManagementController {
         if (!canManageBusiness(businessId, userId, tenantId)) return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
         String query = q == null ? "" : q.trim().toLowerCase(Locale.ROOT);
         if (query.length() < 2) return ResponseEntity.ok(List.of());
-        List<MemberUserSummary> matches = customerProfileRepository.findAll().stream()
+        String phoneQuery = query.replaceAll("\\D", "");
+        List<CustomerProfile> profiles = customerProfileRepository.findAll();
+        Set<Long> linkedCustomerIds = new HashSet<>();
+        businessCustomerRepository.findByTenantIdAndBusinessId(tenantId, businessId)
+            .forEach(link -> linkedCustomerIds.add(link.getCustomerProfileId()));
+        List<CustomerProfile> linkedProfiles = customerProfileRepository.findAllById(linkedCustomerIds);
+        Map<Long, CustomerProfile> linkedByUserId = new HashMap<>();
+        Map<String, CustomerProfile> linkedByEmail = new HashMap<>();
+        Map<String, CustomerProfile> linkedByPhone = new HashMap<>();
+        for (CustomerProfile linkedProfile : linkedProfiles) {
+            if (linkedProfile.getUserId() != null) linkedByUserId.putIfAbsent(linkedProfile.getUserId(), linkedProfile);
+            if (linkedProfile.getEmailNormalized() != null) linkedByEmail.putIfAbsent(linkedProfile.getEmailNormalized(), linkedProfile);
+            if (linkedProfile.getPhoneNormalized() != null) linkedByPhone.putIfAbsent(linkedProfile.getPhoneNormalized(), linkedProfile);
+        }
+
+        Map<Long, CustomerProfile> profilesByUserId = new HashMap<>();
+        for (CustomerProfile profile : profiles) {
+            if (tenantId.equals(profile.getTenantId()) && profile.getUserId() != null) {
+                profilesByUserId.putIfAbsent(profile.getUserId(), profile);
+            }
+        }
+
+        Map<Long, MemberUserSummary> matches = new LinkedHashMap<>();
+        for (CustomerProfile profile : profiles) {
+            if (profile.getUserId() == null || profile.getProfileId() == null) continue;
+            CustomerProfile tenantProfile = profilesByUserId.get(profile.getUserId());
+            CustomerProfile resultProfile = tenantProfile == null ? profile : tenantProfile;
+            CustomerProfile linkedProfile = linkedByUserId.get(profile.getUserId());
+            if (linkedProfile == null && profile.getEmailNormalized() != null) {
+                linkedProfile = linkedByEmail.get(profile.getEmailNormalized());
+            }
+            if (linkedProfile == null && profile.getPhoneNormalized() != null) {
+                linkedProfile = linkedByPhone.get(profile.getPhoneNormalized());
+            }
+            boolean alreadyAdded = linkedProfile != null || linkedCustomerIds.contains(profile.getId());
+            if (linkedProfile != null) resultProfile = linkedProfile;
+
+            if (!matchesMemberSearch(profile, resultProfile, query, phoneQuery)) continue;
+            matches.putIfAbsent(profile.getUserId(), new MemberUserSummary(
+                resultProfile.getId(),
+                resultProfile.getProfileId(),
+                resultProfile.getName(),
+                resultProfile.getEmail(),
+                maskPhone(resultProfile.getPhone()),
+                alreadyAdded
+            ));
+        }
+        return ResponseEntity.ok(matches.values().stream().limit(20).toList());
+    }
+
+    @PostMapping("/businesses/{businessId}/customers/{profileId}")
+    @Transactional
+    public ResponseEntity<CustomerProfileResponse> addRegisteredCustomer(@PathVariable Long businessId,
+                                                                           @PathVariable String profileId) {
+        Long tenantId = TenantContext.getTenantId();
+        Long userId = TenantContext.getUserId();
+        if (!canManageBusiness(businessId, userId, tenantId)) return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+
+        CustomerProfile registeredProfile = customerProfileRepository.findAll().stream()
             .filter(profile -> profile.getUserId() != null)
-            .filter(profile -> profile.getProfileId() != null)
-            .filter(profile -> profile.getProfileId() != null && profile.getProfileId().toLowerCase(Locale.ROOT).contains(query)
-                || profile.getEmail() != null && profile.getEmail().toLowerCase(Locale.ROOT).contains(query)
-                || profile.getPhone() != null && profile.getPhone().contains(query)
-                || profile.getName() != null && profile.getName().toLowerCase(Locale.ROOT).contains(query))
-            .map(profile -> new MemberUserSummary(profile.getId(), profile.getProfileId(), profile.getName(), profile.getEmail(), maskPhone(profile.getPhone())))
-            .limit(20)
-            .toList();
-        return ResponseEntity.ok(matches);
+            .filter(profile -> profileId.equalsIgnoreCase(profile.getProfileId()))
+            .findFirst()
+            .orElse(null);
+        if (registeredProfile == null) return ResponseEntity.notFound().build();
+
+        CustomerProfile profile = registeredProfile;
+        if (!tenantId.equals(registeredProfile.getTenantId())) {
+            profile = customerProfileRepository.findByUserIdAndTenantId(registeredProfile.getUserId(), tenantId)
+                .orElseGet(() -> {
+                    CustomerProfile tenantProfile = new CustomerProfile();
+                    tenantProfile.setTenantId(tenantId);
+                    tenantProfile.setUserId(registeredProfile.getUserId());
+                    tenantProfile.setName(registeredProfile.getName());
+                    tenantProfile.setEmail(registeredProfile.getEmail());
+                    tenantProfile.setPhone(registeredProfile.getPhone());
+                    tenantProfile.setProfileId(ProfileIdGenerator.nextCustomerId(customerProfileRepository::existsByProfileId));
+                    return customerProfileRepository.save(tenantProfile);
+                });
+        }
+
+        if (businessCustomerRepository.findByBusinessIdAndCustomerProfileId(businessId, profile.getId()).isEmpty()) {
+            BusinessCustomer link = new BusinessCustomer();
+            link.setBusinessId(businessId);
+            link.setTenantId(tenantId);
+            link.setCustomerProfileId(profile.getId());
+            link.setStatus("ACTIVE");
+            businessCustomerRepository.save(link);
+        }
+        return ResponseEntity.ok(CustomerProfileResponse.from(profile));
     }
 
     @PostMapping("/businesses/{businessId}/memberships")
@@ -402,5 +486,24 @@ public class MembershipManagementController {
     private String maskPhone(String phone) {
         if (phone == null || phone.length() < 4) return phone;
         return "•••••" + phone.substring(phone.length() - 4);
+    }
+
+    private boolean matchesMemberSearch(CustomerProfile profile, CustomerProfile resultProfile, String query, String phoneQuery) {
+        return containsIgnoreCase(profile.getProfileId(), query)
+            || containsIgnoreCase(resultProfile.getProfileId(), query)
+            || containsIgnoreCase(profile.getEmail(), query)
+            || containsIgnoreCase(resultProfile.getEmail(), query)
+            || !phoneQuery.isEmpty() && (containsDigits(profile.getPhoneNormalized(), phoneQuery)
+                || containsDigits(resultProfile.getPhoneNormalized(), phoneQuery))
+            || containsIgnoreCase(profile.getName(), query)
+            || containsIgnoreCase(resultProfile.getName(), query);
+    }
+
+    private boolean containsIgnoreCase(String value, String query) {
+        return value != null && value.toLowerCase(Locale.ROOT).contains(query);
+    }
+
+    private boolean containsDigits(String value, String digits) {
+        return value != null && value.contains(digits);
     }
 }

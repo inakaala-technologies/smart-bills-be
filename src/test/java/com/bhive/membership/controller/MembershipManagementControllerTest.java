@@ -118,6 +118,97 @@ class MembershipManagementControllerTest {
             }
 
     @Test
+    void addsRegisteredCustomerToAuthorizedBusiness() throws Exception {
+        CustomerProfile profile = new CustomerProfile();
+        profile.setId(31L);
+        profile.setTenantId(5L);
+        profile.setUserId(18L);
+        profile.setProfileId("CUS12345");
+        profile.setName("Ravi Kumar");
+        profile.setEmail("ravi@example.com");
+        profile.setPhone("9876543210");
+        when(customerProfileRepository.findAll()).thenReturn(List.of(profile));
+        when(businessCustomerRepository.findByBusinessIdAndCustomerProfileId(10L, 31L)).thenReturn(Optional.empty());
+        when(businessCustomerRepository.save(any(BusinessCustomer.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        mockMvc.perform(post("/api/v1/businesses/10/customers/CUS12345"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.id").value(31))
+            .andExpect(jsonPath("$.profileId").value("CUS12345"))
+            .andExpect(jsonPath("$.name").value("Ravi Kumar"));
+
+        Mockito.verify(businessCustomerRepository).save(any(BusinessCustomer.class));
+    }
+
+    @Test
+    void refusesToAddUnregisteredCustomerProfile() throws Exception {
+        CustomerProfile profile = new CustomerProfile();
+        profile.setId(31L);
+        profile.setTenantId(5L);
+        profile.setProfileId("CUS12345");
+        profile.setName("Ravi Kumar");
+        when(customerProfileRepository.findAll()).thenReturn(List.of(profile));
+
+        mockMvc.perform(post("/api/v1/businesses/10/customers/CUS12345"))
+            .andExpect(status().isNotFound());
+
+        Mockito.verify(businessCustomerRepository, Mockito.never()).save(any(BusinessCustomer.class));
+    }
+
+    @Test
+    void searchesRegisteredCustomersByNormalizedMobileNumber() throws Exception {
+        CustomerProfile profile = new CustomerProfile();
+        profile.setId(31L);
+        profile.setTenantId(5L);
+        profile.setUserId(18L);
+        profile.setProfileId("CUS12345");
+        profile.setName("Ravi Kumar");
+        profile.setPhone("+91 98765-43210");
+        when(customerProfileRepository.findAll()).thenReturn(List.of(profile));
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get(
+                    "/api/v1/businesses/10/member-search")
+                .param("q", "9876543210"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$[0].profileId").value("CUS12345"))
+            .andExpect(jsonPath("$[0].name").value("Ravi Kumar"));
+    }
+
+    @Test
+    void marksCustomersAlreadyLinkedToBusiness() throws Exception {
+        CustomerProfile registeredProfile = new CustomerProfile();
+        registeredProfile.setId(41L);
+        registeredProfile.setTenantId(9L);
+        registeredProfile.setUserId(18L);
+        registeredProfile.setProfileId("CUS12345");
+        registeredProfile.setName("Ravi Kumar");
+        registeredProfile.setEmail("ravi@example.com");
+        registeredProfile.setPhone("9876543210");
+
+        CustomerProfile linkedProfile = new CustomerProfile();
+        linkedProfile.setId(31L);
+        linkedProfile.setTenantId(5L);
+        linkedProfile.setUserId(18L);
+        linkedProfile.setProfileId("CUS54321");
+        linkedProfile.setName("Ravi Kumar");
+        linkedProfile.setEmail("ravi@example.com");
+        linkedProfile.setPhone("9876543210");
+
+        BusinessCustomer link = new BusinessCustomer();
+        link.setCustomerProfileId(31L);
+        when(customerProfileRepository.findAll()).thenReturn(List.of(registeredProfile, linkedProfile));
+        when(businessCustomerRepository.findByTenantIdAndBusinessId(5L, 10L)).thenReturn(List.of(link));
+        when(customerProfileRepository.findAllById(java.util.Set.of(31L))).thenReturn(List.of(linkedProfile));
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get(
+                    "/api/v1/businesses/10/member-search")
+                .param("q", "CUS12345"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$[0].id").value(31))
+            .andExpect(jsonPath("$[0].alreadyAdded").value(true));
+    }
+
+    @Test
     void createsLocalMemberAndSubscriptionFromPlanSnapshot() throws Exception {
         MembershipPlan plan = new MembershipPlan();
         plan.setId(21L);
