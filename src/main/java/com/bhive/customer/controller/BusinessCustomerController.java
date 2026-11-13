@@ -3,6 +3,7 @@ package com.bhive.customer.controller;
 import com.bhive.business.entity.Business;
 import com.bhive.business.repository.BusinessRepository;
 import com.bhive.business.service.BusinessMembershipService;
+import com.bhive.common.service.CacheInvalidationService;
 import com.bhive.common.util.TenantContext;
 import com.bhive.customer.entity.BusinessCustomer;
 import com.bhive.customer.entity.CustomerProfile;
@@ -22,15 +23,18 @@ public class BusinessCustomerController {
     private final CustomerProfileRepository customerProfileRepository;
     private final BusinessRepository businessRepository;
     private final BusinessMembershipService businessMembershipService;
+    private final CacheInvalidationService cacheInvalidationService;
 
     public BusinessCustomerController(BusinessCustomerRepository businessCustomerRepository,
                                       CustomerProfileRepository customerProfileRepository,
                                       BusinessRepository businessRepository,
-                                      BusinessMembershipService businessMembershipService) {
+                                      BusinessMembershipService businessMembershipService,
+                                      CacheInvalidationService cacheInvalidationService) {
         this.businessCustomerRepository = businessCustomerRepository;
         this.customerProfileRepository = customerProfileRepository;
         this.businessRepository = businessRepository;
         this.businessMembershipService = businessMembershipService;
+        this.cacheInvalidationService = cacheInvalidationService;
     }
 
     @GetMapping
@@ -63,6 +67,7 @@ public class BusinessCustomerController {
             || request.getBusinessId() == null || request.getCustomerProfileId() == null) {
             return ResponseEntity.badRequest().build();
         }
+
         boolean canManageBusiness = businessRepository.findById(request.getBusinessId())
             .map(Business::getTenantId)
             .filter(tenantId::equals)
@@ -75,16 +80,17 @@ public class BusinessCustomerController {
             .orElse(null);
         if (profile == null) return ResponseEntity.notFound().build();
 
-        return businessCustomerRepository.findByBusinessIdAndCustomerProfileId(request.getBusinessId(), profile.getId())
-            .map(ResponseEntity::ok)
-            .orElseGet(() -> {
-                BusinessCustomer link = new BusinessCustomer();
-                link.setBusinessId(request.getBusinessId());
-                link.setCustomerProfileId(profile.getId());
-                link.setTenantId(tenantId);
-                link.setStatus("ACTIVE");
-                return ResponseEntity.status(HttpStatus.CREATED).body(businessCustomerRepository.save(link));
-            });
+        var existing = businessCustomerRepository.findByBusinessIdAndCustomerProfileId(request.getBusinessId(), profile.getId());
+        if (existing.isPresent()) return ResponseEntity.ok(existing.get());
+
+        BusinessCustomer link = new BusinessCustomer();
+        link.setBusinessId(request.getBusinessId());
+        link.setCustomerProfileId(profile.getId());
+        link.setTenantId(tenantId);
+        link.setStatus("ACTIVE");
+        BusinessCustomer saved = businessCustomerRepository.save(link);
+        cacheInvalidationService.evictBusinessDataCaches();
+        return ResponseEntity.status(HttpStatus.CREATED).body(saved);
     }
 
     @GetMapping("/{id}")

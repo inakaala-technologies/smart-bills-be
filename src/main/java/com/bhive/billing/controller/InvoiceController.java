@@ -9,6 +9,7 @@ import com.bhive.billing.dto.InvoiceLineItemRequest;
 import com.bhive.billing.dto.InvoiceResponse;
 import com.bhive.billing.repository.InvoiceRepository;
 import com.bhive.business.service.BusinessMembershipService;
+import com.bhive.common.service.CacheInvalidationService;
 import com.bhive.common.util.TenantContext;
 import com.bhive.customer.entity.BusinessCustomer;
 import com.bhive.customer.entity.CustomerProfile;
@@ -30,6 +31,9 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 import jakarta.validation.Valid;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -39,25 +43,29 @@ import org.springframework.transaction.annotation.Transactional;
 @RequestMapping("/api/v1/billing")
 public class InvoiceController {
 
+	private static final Logger log = LoggerFactory.getLogger(CacheInvalidationService.class);
+
 	private final InvoiceRepository invoiceRepository;
 	private final BusinessMembershipService businessMembershipService;
 	private final BusinessCustomerRepository businessCustomerRepository;
 	private final CustomerProfileRepository customerProfileRepository;
 	private final NotificationService notificationService;
-    private final LoyaltyService loyaltyService;
+	private final LoyaltyService loyaltyService;
 	private final FamilyMemberRepository familyMemberRepository;
+	private final CacheInvalidationService cacheInvalidationService;
 
 	public InvoiceController(InvoiceRepository invoiceRepository, BusinessMembershipService businessMembershipService,
 			BusinessCustomerRepository businessCustomerRepository, CustomerProfileRepository customerProfileRepository,
 			NotificationService notificationService, FamilyMemberRepository familyMemberRepository,
-                            LoyaltyService loyaltyService) {
+			LoyaltyService loyaltyService, CacheInvalidationService cacheInvalidationService) {
 		this.invoiceRepository = invoiceRepository;
 		this.businessMembershipService = businessMembershipService;
 		this.businessCustomerRepository = businessCustomerRepository;
 		this.customerProfileRepository = customerProfileRepository;
 		this.notificationService = notificationService;
 		this.familyMemberRepository = familyMemberRepository;
-        this.loyaltyService = loyaltyService;
+		this.loyaltyService = loyaltyService;
+		this.cacheInvalidationService = cacheInvalidationService;
 	}
 
 	private boolean canAccessInvoice(Long userId, Long tenantId, Invoice invoice) {
@@ -127,46 +135,52 @@ public class InvoiceController {
 				.orElse(ResponseEntity.status(HttpStatus.FORBIDDEN).build());
 	}
 
-    @PostMapping("/invoices")
-    @Transactional
-    public ResponseEntity<InvoiceResponse> createInvoice(@Valid @RequestBody InvoiceCreateRequest request) {
-        Long tenantId = TenantContext.getTenantId();
-        Long userId = TenantContext.getUserId();
-        if (tenantId == null || userId == null || !businessMembershipService.userHasAccessToBusiness(userId, request.businessId(), tenantId)) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
-        }
-        BigDecimal grossAmount = request.subtotal().add(request.gstAmount());
-        BigDecimal invoiceDiscountAmount = request.invoiceDiscountAmount() == null
-            ? BigDecimal.ZERO
-            : request.invoiceDiscountAmount();
-        BigDecimal invoiceDiscountValue = request.invoiceDiscountValue() == null
-            ? BigDecimal.ZERO
-            : request.invoiceDiscountValue();
-        BigDecimal expectedDiscountAmount = BigDecimal.ZERO;
-        if (request.invoiceDiscountType() != null) {
-            expectedDiscountAmount = request.invoiceDiscountType() == InvoiceDiscountType.PERCENTAGE
-                ? grossAmount.multiply(invoiceDiscountValue).divide(BigDecimal.valueOf(100), 2, java.math.RoundingMode.HALF_UP)
-                : invoiceDiscountValue.setScale(2, java.math.RoundingMode.HALF_UP);
-        }
-        if (invoiceDiscountAmount.signum() < 0
-            || invoiceDiscountAmount.compareTo(grossAmount) > 0
-            || (request.invoiceDiscountType() == null && (invoiceDiscountAmount.signum() > 0 || invoiceDiscountValue.signum() > 0))
-            || (request.invoiceDiscountType() != null && request.invoiceDiscountType() == InvoiceDiscountType.PERCENTAGE
-                && invoiceDiscountValue.compareTo(BigDecimal.valueOf(100)) > 0)
-            || (request.invoiceDiscountType() != null && expectedDiscountAmount.compareTo(invoiceDiscountAmount) != 0)
-            || request.totalAmount().compareTo(grossAmount.subtract(invoiceDiscountAmount)) != 0
-            || !itemTotalsMatch(request)) {
-            return ResponseEntity.badRequest().build();
-        }
-        if ((request.status() != InvoiceStatus.DRAFT && request.status() != InvoiceStatus.SENT && request.status() != InvoiceStatus.PAID)
-            || (request.status() == InvoiceStatus.PAID && request.dueDate() != null)) {
-            return ResponseEntity.badRequest().build();
-        }
-        Optional<CustomerProfile> customer = customerProfileRepository.findById(request.customerId())
-            .filter(profile -> tenantId.equals(profile.getTenantId()));
-        if (customer.isEmpty()) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
-        }
+	@PostMapping("/invoices")
+	@Transactional
+	public ResponseEntity<InvoiceResponse> createInvoice(@Valid @RequestBody InvoiceCreateRequest request) {
+
+		log.info("Creating invoice. Business ID: {}", request.businessId());
+
+		Long tenantId = TenantContext.getTenantId();
+		Long userId = TenantContext.getUserId();
+		if (tenantId == null || userId == null
+				|| !businessMembershipService.userHasAccessToBusiness(userId, request.businessId(), tenantId)) {
+			return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+		}
+		BigDecimal grossAmount = request.subtotal().add(request.gstAmount());
+		BigDecimal invoiceDiscountAmount = request.invoiceDiscountAmount() == null ? BigDecimal.ZERO
+				: request.invoiceDiscountAmount();
+		BigDecimal invoiceDiscountValue = request.invoiceDiscountValue() == null ? BigDecimal.ZERO
+				: request.invoiceDiscountValue();
+		BigDecimal expectedDiscountAmount = BigDecimal.ZERO;
+		if (request.invoiceDiscountType() != null) {
+			expectedDiscountAmount = request.invoiceDiscountType() == InvoiceDiscountType.PERCENTAGE
+					? grossAmount.multiply(invoiceDiscountValue).divide(BigDecimal.valueOf(100), 2,
+							java.math.RoundingMode.HALF_UP)
+					: invoiceDiscountValue.setScale(2, java.math.RoundingMode.HALF_UP);
+		}
+		if (invoiceDiscountAmount.signum() < 0 || invoiceDiscountAmount.compareTo(grossAmount) > 0
+				|| (request.invoiceDiscountType() == null
+						&& (invoiceDiscountAmount.signum() > 0 || invoiceDiscountValue.signum() > 0))
+				|| (request.invoiceDiscountType() != null
+						&& request.invoiceDiscountType() == InvoiceDiscountType.PERCENTAGE
+						&& invoiceDiscountValue.compareTo(BigDecimal.valueOf(100)) > 0)
+				|| (request.invoiceDiscountType() != null
+						&& expectedDiscountAmount.compareTo(invoiceDiscountAmount) != 0)
+				|| request.totalAmount().compareTo(grossAmount.subtract(invoiceDiscountAmount)) != 0
+				|| !itemTotalsMatch(request)) {
+			return ResponseEntity.badRequest().build();
+		}
+		if ((request.status() != InvoiceStatus.DRAFT && request.status() != InvoiceStatus.SENT
+				&& request.status() != InvoiceStatus.PAID)
+				|| (request.status() == InvoiceStatus.PAID && request.dueDate() != null)) {
+			return ResponseEntity.badRequest().build();
+		}
+		Optional<CustomerProfile> customer = customerProfileRepository.findById(request.customerId())
+				.filter(profile -> tenantId.equals(profile.getTenantId()));
+		if (customer.isEmpty()) {
+			return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+		}
 
 		businessCustomerRepository.findByBusinessIdAndCustomerProfileId(request.businessId(), request.customerId())
 				.or(() -> {
@@ -200,6 +214,7 @@ public class InvoiceController {
             )));
         }
         Invoice saved = invoiceRepository.save(invoice);
+		cacheInvalidationService.evictBusinessDataCaches();
         if (saved.getStatus() == InvoiceStatus.PAID) {
             loyaltyService.awardInvoiceIfConfigured(tenantId, saved.getBusinessId(), saved.getCustomerId(),
                 saved.getId(), saved.getTotalAmount());
@@ -223,25 +238,21 @@ public class InvoiceController {
         return ResponseEntity.ok(InvoiceResponse.from(responseInvoice));
     }
 
-    private boolean itemTotalsMatch(InvoiceCreateRequest request) {
-        List<InvoiceLineItemRequest> items = request.items();
-        if (items == null || items.isEmpty()) {
-            return true;
-        }
+	private boolean itemTotalsMatch(InvoiceCreateRequest request) {
+		List<InvoiceLineItemRequest> items = request.items();
+		if (items == null || items.isEmpty()) {
+			return true;
+		}
 
-        BigDecimal subtotal = items.stream()
-            .map(item -> item.quantity().multiply(item.unitPrice()))
-            .reduce(BigDecimal.ZERO, BigDecimal::add)
-            .setScale(2, RoundingMode.HALF_UP);
-        BigDecimal gstAmount = items.stream()
-            .map(item -> item.quantity().multiply(item.unitPrice()).multiply(item.gstRate())
-                .divide(BigDecimal.valueOf(100)))
-            .reduce(BigDecimal.ZERO, BigDecimal::add)
-            .setScale(2, RoundingMode.HALF_UP);
+		BigDecimal subtotal = items.stream().map(item -> item.quantity().multiply(item.unitPrice()))
+				.reduce(BigDecimal.ZERO, BigDecimal::add).setScale(2, RoundingMode.HALF_UP);
+		BigDecimal gstAmount = items.stream()
+				.map(item -> item.quantity().multiply(item.unitPrice()).multiply(item.gstRate())
+						.divide(BigDecimal.valueOf(100)))
+				.reduce(BigDecimal.ZERO, BigDecimal::add).setScale(2, RoundingMode.HALF_UP);
 
-        return subtotal.compareTo(request.subtotal()) == 0
-            && gstAmount.compareTo(request.gstAmount()) == 0;
-    }
+		return subtotal.compareTo(request.subtotal()) == 0 && gstAmount.compareTo(request.gstAmount()) == 0;
+	}
 
 	@PatchMapping("/invoices/{id}/status")
 	public ResponseEntity<InvoiceResponse> updateInvoiceStatus(@PathVariable Long id,
@@ -284,6 +295,7 @@ public class InvoiceController {
 
 		invoice.setStatus(requestedStatus);
 		Invoice saved = invoiceRepository.save(invoice);
+		cacheInvalidationService.evictBusinessDataCaches();
 		if (recordingPayment) {
 			loyaltyService.awardInvoiceIfConfigured(tenantId, saved.getBusinessId(), saved.getCustomerId(),
 					saved.getId(), saved.getTotalAmount());
@@ -295,7 +307,8 @@ public class InvoiceController {
 					.filter(recipientUserId -> recipientUserId != null && !recipientUserId.equals(userId))
 					.ifPresent(recipientUserId -> notificationService.create(tenantId, recipientUserId,
 							"INVOICE_CREATED", "New invoice",
-							"Invoice " + notificationInvoice.getInvoiceNumber() + " is ready to review.", "/dashboard"));
+							"Invoice " + notificationInvoice.getInvoiceNumber() + " is ready to review.",
+							"/dashboard"));
 		}
 
 		return ResponseEntity.ok(InvoiceResponse.from(saved));

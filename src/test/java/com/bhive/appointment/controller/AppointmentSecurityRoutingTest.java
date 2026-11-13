@@ -10,6 +10,7 @@ import com.bhive.business.repository.BusinessRepository;
 import com.bhive.business.repository.BusinessUserRepository;
 import com.bhive.business.service.BusinessMembershipService;
 import com.bhive.common.config.SecurityConfig;
+import com.bhive.common.service.CacheInvalidationService;
 import com.bhive.common.config.AccessTokenService;
 import com.bhive.common.config.AccessTokenService.AuthenticatedUser;
 import com.bhive.customer.entity.BusinessCustomer;
@@ -83,6 +84,9 @@ class AppointmentSecurityRoutingTest {
 
     @MockBean
     private AccessTokenService accessTokenService;
+    
+    @MockBean
+    private CacheInvalidationService cacheInvalidationService;
 
     @Test
     void registrationPreflightAllowsActiveViteOrigin() throws Exception {

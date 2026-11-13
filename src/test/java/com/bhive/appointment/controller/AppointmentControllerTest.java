@@ -13,6 +13,7 @@ import com.bhive.business.entity.BusinessUser;
 import com.bhive.business.repository.BusinessRepository;
 import com.bhive.business.repository.BusinessUserRepository;
 import com.bhive.business.service.BusinessMembershipService;
+import com.bhive.common.service.CacheInvalidationService;
 import com.bhive.common.util.TenantContext;
 import com.bhive.customer.entity.BusinessCustomer;
 import com.bhive.customer.entity.CustomerProfile;
@@ -81,6 +82,9 @@ class AppointmentControllerTest {
 
     @MockBean
     private AppointmentBillingService appointmentBillingService;
+    
+    @MockBean
+    private CacheInvalidationService cacheInvalidationService;
 
     @BeforeEach
     void setTenantContext() {

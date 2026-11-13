@@ -9,6 +9,7 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.bhive.appointment.repository.AppointmentRepository;
 import com.bhive.billing.entity.Invoice;
 import com.bhive.billing.entity.InvoiceStatus;
 import com.bhive.billing.repository.InvoiceRepository;
@@ -17,23 +18,28 @@ import com.bhive.business.entity.BusinessStatus;
 import com.bhive.business.entity.BusinessUser;
 import com.bhive.business.repository.BusinessRepository;
 import com.bhive.business.repository.BusinessUserRepository;
+import com.bhive.business.service.BusinessMembershipService;
+import com.bhive.common.service.CacheInvalidationService;
+import com.bhive.common.service.S3ImageUploadService;
 import com.bhive.common.util.TenantContext;
-import com.bhive.appointment.repository.AppointmentRepository;
-import com.bhive.customer.repository.BusinessCustomerRepository;
 import com.bhive.customer.entity.CustomerProfile;
+import com.bhive.customer.repository.BusinessCustomerRepository;
 import com.bhive.customer.repository.CustomerProfileRepository;
 import com.bhive.payment.entity.Payment;
 import com.bhive.payment.entity.PaymentStatus;
 import com.bhive.payment.repository.PaymentRepository;
+
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
+
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
+
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -61,8 +67,32 @@ class BusinessControllerTest {
     @Mock
     private AppointmentRepository appointmentRepository;
 
-    @InjectMocks
+    @Mock
+    private CacheInvalidationService cacheInvalidationService;
+
+    @Mock
+    private BusinessMembershipService businessMembershipService;
+
+    @Mock
+    private S3ImageUploadService s3ImageUploadService;
+
     private BusinessController businessController;
+
+    @BeforeEach
+    void setUp() {
+        businessController = new BusinessController(
+                businessRepository,
+                businessUserRepository,
+                customerProfileRepository,
+                businessCustomerRepository,
+                invoiceRepository,
+                paymentRepository,
+                appointmentRepository,
+                businessMembershipService,
+                s3ImageUploadService,
+                cacheInvalidationService
+        );
+    }
 
     @AfterEach
     void tearDown() {
@@ -97,7 +127,9 @@ class BusinessControllerTest {
 
         assertNotNull(result);
         assertEquals(101L, result.getId());
+
         verify(businessUserRepository, times(1)).save(any(BusinessUser.class));
+        verify(cacheInvalidationService, times(1)).evictBusinessDataCaches();
     }
 
     @Test
@@ -153,7 +185,7 @@ class BusinessControllerTest {
         outsideRadius.setLongitude(-122.4194);
 
         when(businessRepository.findByStatusAndLatitudeIsNotNullAndLongitudeIsNotNull(BusinessStatus.ACTIVE))
-            .thenReturn(List.of(outsideRadius, nearest));
+                .thenReturn(List.of(outsideRadius, nearest));
 
         var response = businessController.getNearbyBusinesses(37.7749, -122.4194, 2);
 
@@ -167,8 +199,10 @@ class BusinessControllerTest {
     void returnsInvoiceRevenueTrendForDailyWeeklyAndMonthlyIntervals() {
         TenantContext.setTenantId(7L);
         TenantContext.setUserId(15L);
+
         BusinessUser user = new BusinessUser();
         user.setBusinessId(101L);
+
         Invoice invoice = new Invoice();
         invoice.setBusinessId(101L);
         invoice.setId(101L);
@@ -176,6 +210,7 @@ class BusinessControllerTest {
         invoice.setCreatedAt(LocalDateTime.now());
         invoice.setTotalAmount(new BigDecimal("125.00"));
         invoice.setStatus(InvoiceStatus.SENT);
+
         Invoice paidInvoice = new Invoice();
         paidInvoice.setBusinessId(101L);
         paidInvoice.setId(102L);
@@ -183,16 +218,19 @@ class BusinessControllerTest {
         paidInvoice.setCreatedAt(LocalDateTime.now().minusDays(1));
         paidInvoice.setTotalAmount(new BigDecimal("75.00"));
         paidInvoice.setStatus(InvoiceStatus.PAID);
+
         Payment verifiedPayment = new Payment();
         verifiedPayment.setBusinessId(101L);
         verifiedPayment.setInvoiceId(101L);
         verifiedPayment.setStatus(PaymentStatus.VERIFIED);
         verifiedPayment.setAmount(new BigDecimal("50.00"));
+
         Payment unverifiedPayment = new Payment();
         unverifiedPayment.setBusinessId(101L);
         unverifiedPayment.setInvoiceId(101L);
         unverifiedPayment.setStatus(PaymentStatus.PENDING);
         unverifiedPayment.setAmount(new BigDecimal("25.00"));
+
         when(businessUserRepository.findByUserIdAndTenantId(15L, 7L)).thenReturn(List.of(user));
         when(invoiceRepository.findAll()).thenReturn(List.of(invoice, paidInvoice));
         when(paymentRepository.findAll()).thenReturn(List.of(verifiedPayment, unverifiedPayment));
@@ -207,9 +245,11 @@ class BusinessControllerTest {
         assertEquals(7, ((List<?>) daily.get("revenueTrend")).size());
         assertEquals(6, ((List<?>) weekly.get("revenueTrend")).size());
         assertEquals(6, ((List<?>) monthly.get("revenueTrend")).size());
+
         assertEquals(200.0, trendValueAt(daily, 6));
         assertEquals(200.0, trendValueAt(weekly, 5));
         assertEquals(200.0, trendValueAt(monthly, 5));
+
         assertEquals(200.0, ((Number) monthly.get("billableRevenue")).doubleValue());
         assertEquals(125.0, ((Number) monthly.get("completedRevenue")).doubleValue());
         assertEquals(75.0, ((Number) monthly.get("pendingPayments")).doubleValue());
@@ -241,7 +281,8 @@ class BusinessControllerTest {
         when(businessUserRepository.findByUserIdAndTenantId(15L, 7L)).thenReturn(List.of(membership));
         when(businessRepository.findById(101L)).thenReturn(Optional.of(existingBusiness));
         when(businessRepository.save(any(Business.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(businessUserRepository.findByTenantIdAndBusinessIdAndUserId(7L, 101L, 15L)).thenReturn(Optional.of(membership));
+        when(businessUserRepository.findByTenantIdAndBusinessIdAndUserId(7L, 101L, 15L))
+                .thenReturn(Optional.of(membership));
 
         Business updatedRequest = new Business();
         updatedRequest.setName("Green Leaf Studio");
@@ -264,6 +305,8 @@ class BusinessControllerTest {
         assertEquals("San Francisco, California, United States", result.getAddress());
         assertEquals(37.7749, result.getLatitude());
         assertEquals(-122.4194, result.getLongitude());
+
         verify(businessUserRepository, never()).save(any(BusinessUser.class));
+        verify(cacheInvalidationService, times(1)).evictBusinessDataCaches();
     }
 }
