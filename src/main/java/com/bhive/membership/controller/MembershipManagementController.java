@@ -132,12 +132,8 @@ public class MembershipManagementController {
             .forEach(link -> linkedCustomerIds.add(link.getCustomerProfileId()));
         List<CustomerProfile> linkedProfiles = customerProfileRepository.findAllById(linkedCustomerIds);
         Map<Long, CustomerProfile> linkedByUserId = new HashMap<>();
-        Map<String, CustomerProfile> linkedByEmail = new HashMap<>();
-        Map<String, CustomerProfile> linkedByPhone = new HashMap<>();
         for (CustomerProfile linkedProfile : linkedProfiles) {
             if (linkedProfile.getUserId() != null) linkedByUserId.putIfAbsent(linkedProfile.getUserId(), linkedProfile);
-            if (linkedProfile.getEmailNormalized() != null) linkedByEmail.putIfAbsent(linkedProfile.getEmailNormalized(), linkedProfile);
-            if (linkedProfile.getPhoneNormalized() != null) linkedByPhone.putIfAbsent(linkedProfile.getPhoneNormalized(), linkedProfile);
         }
 
         Map<Long, CustomerProfile> profilesByUserId = new HashMap<>();
@@ -153,12 +149,6 @@ public class MembershipManagementController {
             CustomerProfile tenantProfile = profilesByUserId.get(profile.getUserId());
             CustomerProfile resultProfile = tenantProfile == null ? profile : tenantProfile;
             CustomerProfile linkedProfile = linkedByUserId.get(profile.getUserId());
-            if (linkedProfile == null && profile.getEmailNormalized() != null) {
-                linkedProfile = linkedByEmail.get(profile.getEmailNormalized());
-            }
-            if (linkedProfile == null && profile.getPhoneNormalized() != null) {
-                linkedProfile = linkedByPhone.get(profile.getPhoneNormalized());
-            }
             boolean alreadyAdded = linkedProfile != null || linkedCustomerIds.contains(profile.getId());
             if (linkedProfile != null) resultProfile = linkedProfile;
 

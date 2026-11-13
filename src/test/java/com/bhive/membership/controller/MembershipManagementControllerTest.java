@@ -209,6 +209,42 @@ class MembershipManagementControllerTest {
     }
 
     @Test
+    void doesNotMatchAnotherCustomerBySharedPhoneNumber() throws Exception {
+        CustomerProfile alreadyLinkedCustomer = new CustomerProfile();
+        alreadyLinkedCustomer.setId(31L);
+        alreadyLinkedCustomer.setTenantId(5L);
+        alreadyLinkedCustomer.setUserId(18L);
+        alreadyLinkedCustomer.setProfileId("CUSAAAAE");
+        alreadyLinkedCustomer.setName("customer2");
+        alreadyLinkedCustomer.setEmail("customer2@gmail.com");
+        alreadyLinkedCustomer.setPhone("+91 98765-7766");
+
+        CustomerProfile searchMatch = new CustomerProfile();
+        searchMatch.setId(32L);
+        searchMatch.setTenantId(5L);
+        searchMatch.setUserId(19L);
+        searchMatch.setProfileId("CUSEHQLD");
+        searchMatch.setName("customer 3");
+        searchMatch.setEmail("customer3@gmail.com");
+        searchMatch.setPhone("+91 98765-7766");
+
+        BusinessCustomer link = new BusinessCustomer();
+        link.setCustomerProfileId(31L);
+        when(customerProfileRepository.findAll()).thenReturn(List.of(alreadyLinkedCustomer, searchMatch));
+        when(businessCustomerRepository.findByTenantIdAndBusinessId(5L, 10L)).thenReturn(List.of(link));
+        when(customerProfileRepository.findAllById(java.util.Set.of(31L))).thenReturn(List.of(alreadyLinkedCustomer));
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get(
+                    "/api/v1/businesses/10/member-search")
+                .param("q", "customer3@gmail.com"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.length()").value(1))
+            .andExpect(jsonPath("$[0].id").value(32))
+            .andExpect(jsonPath("$[0].email").value("customer3@gmail.com"))
+            .andExpect(jsonPath("$[0].alreadyAdded").value(false));
+    }
+
+    @Test
     void createsLocalMemberAndSubscriptionFromPlanSnapshot() throws Exception {
         MembershipPlan plan = new MembershipPlan();
         plan.setId(21L);
