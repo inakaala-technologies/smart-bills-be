@@ -1,4 +1,3 @@
-
 package com.bhive.common.config;
 
 import java.time.Duration;
@@ -33,11 +32,14 @@ public class RedisCacheConfig implements CachingConfigurer {
 	@Value("${app.cache.ttl:30m}")
 	private Duration cacheTtl;
 
+	@Value("${spring.cache.redis.key-prefix:bhive:}")
+	private String cacheKeyPrefix;
+
 	@Bean
 	public CacheManager cacheManager(RedisConnectionFactory connectionFactory) {
 
 		RedisCacheConfiguration configuration = RedisCacheConfiguration.defaultCacheConfig().entryTtl(cacheTtl)
-				.disableCachingNullValues().computePrefixWith(cacheName -> "bhive::" + cacheName + "::")
+				.disableCachingNullValues().computePrefixWith(cacheName -> cacheKeyPrefix + cacheName + "::")
 				.serializeKeysWith(
 						RedisSerializationContext.SerializationPair.fromSerializer(new StringRedisSerializer()))
 				.serializeValuesWith(RedisSerializationContext.SerializationPair
