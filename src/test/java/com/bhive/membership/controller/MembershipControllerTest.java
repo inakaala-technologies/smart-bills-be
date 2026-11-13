@@ -9,6 +9,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.bhive.business.service.BusinessMembershipService;
+import com.bhive.common.service.CacheInvalidationService;
 import com.bhive.common.util.TenantContext;
 import com.bhive.customer.entity.CustomerProfile;
 import com.bhive.customer.repository.CustomerProfileRepository;
@@ -47,6 +48,9 @@ class MembershipControllerTest {
 
     @MockBean
     private NotificationService notificationService;
+    
+    @MockBean
+    private CacheInvalidationService cacheInvalidationService;
 
     @AfterEach
     void tearDown() {

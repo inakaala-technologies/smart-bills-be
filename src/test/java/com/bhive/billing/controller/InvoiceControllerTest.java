@@ -3,6 +3,7 @@ package com.bhive.billing.controller;
 import com.bhive.billing.entity.Invoice;
 import com.bhive.billing.entity.InvoiceStatus;
 import com.bhive.billing.repository.InvoiceRepository;
+import com.bhive.common.service.CacheInvalidationService;
 import com.bhive.common.util.TenantContext;
 import com.bhive.customer.entity.BusinessCustomer;
 import com.bhive.customer.entity.CustomerProfile;
@@ -65,6 +66,9 @@ class InvoiceControllerTest {
 
 	@MockBean
 	private FamilyMemberRepository familyMemberRepository;
+	
+	@MockBean
+	private CacheInvalidationService cacheInvalidationService;
 
 	@AfterEach
 	void tearDown() {

@@ -1,6 +1,7 @@
 package com.bhive.membership.controller;
 
 import com.bhive.business.service.BusinessMembershipService;
+import com.bhive.common.service.CacheInvalidationService;
 import com.bhive.common.util.TenantContext;
 import com.bhive.customer.entity.CustomerProfile;
 import com.bhive.customer.repository.CustomerProfileRepository;
@@ -17,94 +18,94 @@ import org.springframework.web.bind.annotation.*;
 @RequestMapping("/api/v1")
 public class MembershipController {
 
-    private final MembershipRepository membershipRepository;
-    private final BusinessMembershipService businessMembershipService;
-    private final CustomerProfileRepository customerProfileRepository;
-    private final NotificationService notificationService;
+	private final MembershipRepository membershipRepository;
+	private final BusinessMembershipService businessMembershipService;
+	private final CustomerProfileRepository customerProfileRepository;
+	private final NotificationService notificationService;
+	private final CacheInvalidationService cacheInvalidationService;
 
-    public MembershipController(MembershipRepository membershipRepository,
-                               BusinessMembershipService businessMembershipService,
-                               CustomerProfileRepository customerProfileRepository,
-                               NotificationService notificationService) {
-        this.membershipRepository = membershipRepository;
-        this.businessMembershipService = businessMembershipService;
-        this.customerProfileRepository = customerProfileRepository;
-        this.notificationService = notificationService;
-    }
+	public MembershipController(MembershipRepository membershipRepository,
+			BusinessMembershipService businessMembershipService, CustomerProfileRepository customerProfileRepository,
+			NotificationService notificationService, CacheInvalidationService cacheInvalidationService) {
+		this.membershipRepository = membershipRepository;
+		this.businessMembershipService = businessMembershipService;
+		this.customerProfileRepository = customerProfileRepository;
+		this.notificationService = notificationService;
+		this.cacheInvalidationService = cacheInvalidationService;
+	}
 
-    @GetMapping("/memberships")
-    public List<Membership> getAllMemberships() {
-        Long tenantId = TenantContext.getTenantId();
-        Long userId = TenantContext.getUserId();
+	@GetMapping("/memberships")
+	public List<Membership> getAllMemberships() {
+		Long tenantId = TenantContext.getTenantId();
+		Long userId = TenantContext.getUserId();
 
-        return membershipRepository.findAll().stream()
-            .filter(membership -> tenantId == null || tenantId.equals(membership.getTenantId()))
-            .filter(membership -> userId == null || membership.getBusinessId() == null || businessMembershipService.userHasAccessToBusiness(userId, membership.getBusinessId(), tenantId))
-            .toList();
-    }
+		return membershipRepository.findAll().stream()
+				.filter(membership -> tenantId == null || tenantId.equals(membership.getTenantId()))
+				.filter(membership -> userId == null || membership.getBusinessId() == null || businessMembershipService
+						.userHasAccessToBusiness(userId, membership.getBusinessId(), tenantId))
+				.toList();
+	}
 
-    @GetMapping("/memberships/{id}")
-    public ResponseEntity<Membership> getMembershipById(@PathVariable Long id) {
-        Long tenantId = TenantContext.getTenantId();
-        Long userId = TenantContext.getUserId();
+	@GetMapping("/memberships/{id}")
+	public ResponseEntity<Membership> getMembershipById(@PathVariable Long id) {
+		Long tenantId = TenantContext.getTenantId();
+		Long userId = TenantContext.getUserId();
 
-        return membershipRepository.findById(id)
-            .filter(membership -> tenantId == null || tenantId.equals(membership.getTenantId()))
-            .filter(membership -> userId == null || membership.getBusinessId() == null || businessMembershipService.userHasAccessToBusiness(userId, membership.getBusinessId(), tenantId))
-            .map(ResponseEntity::ok)
-            .orElse(ResponseEntity.status(HttpStatus.FORBIDDEN).build());
-    }
+		return membershipRepository.findById(id)
+				.filter(membership -> tenantId == null || tenantId.equals(membership.getTenantId()))
+				.filter(membership -> userId == null || membership.getBusinessId() == null
+						|| businessMembershipService.userHasAccessToBusiness(userId, membership.getBusinessId(),
+								tenantId))
+				.map(ResponseEntity::ok).orElse(ResponseEntity.status(HttpStatus.FORBIDDEN).build());
+	}
 
-    @PostMapping("/memberships")
-    public ResponseEntity<Membership> createMembership(@RequestBody Membership membership) {
-        Long tenantId = TenantContext.getTenantId();
-        Long userId = TenantContext.getUserId();
+	@PostMapping("/memberships")
+	public ResponseEntity<Membership> createMembership(@RequestBody Membership membership) {
+		Long tenantId = TenantContext.getTenantId();
+		Long userId = TenantContext.getUserId();
 
-        if (membership == null) {
-            return ResponseEntity.badRequest().build();
-        }
+		if (membership == null) {
+			return ResponseEntity.badRequest().build();
+		}
 
-        if (membership.getTenantId() == null || membership.getBusinessId() == null || membership.getCustomerId() == null) {
-            return ResponseEntity.badRequest().build();
-        }
+		if (membership.getTenantId() == null || membership.getBusinessId() == null
+				|| membership.getCustomerId() == null) {
+			return ResponseEntity.badRequest().build();
+		}
 
-        if (tenantId != null && !tenantId.equals(membership.getTenantId())) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
-        }
+		if (tenantId != null && !tenantId.equals(membership.getTenantId())) {
+			return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+		}
 
-        if (membership.getPlanName() == null || membership.getPlanName().isBlank()) {
-            return ResponseEntity.badRequest().build();
-        }
+		if (membership.getPlanName() == null || membership.getPlanName().isBlank()) {
+			return ResponseEntity.badRequest().build();
+		}
 
-        if (membership.getStartDate() == null) {
-            return ResponseEntity.badRequest().build();
-        }
+		if (membership.getStartDate() == null) {
+			return ResponseEntity.badRequest().build();
+		}
 
-        if (membership.getEndDate() != null && membership.getEndDate().isBefore(membership.getStartDate())) {
-            return ResponseEntity.badRequest().build();
-        }
+		if (membership.getEndDate() != null && membership.getEndDate().isBefore(membership.getStartDate())) {
+			return ResponseEntity.badRequest().build();
+		}
 
-        if (membership.getBusinessId() != null && (userId == null || tenantId == null || !businessMembershipService.userHasAccessToBusiness(userId, membership.getBusinessId(), tenantId))) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
-        }
+		if (membership.getBusinessId() != null && (userId == null || tenantId == null
+				|| !businessMembershipService.userHasAccessToBusiness(userId, membership.getBusinessId(), tenantId))) {
+			return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+		}
 
-        if (membership.getStatus() == null) {
-            membership.setStatus(MembershipStatus.PENDING);
-        }
+		if (membership.getStatus() == null) {
+			membership.setStatus(MembershipStatus.PENDING);
+		}
 
-        Membership saved = membershipRepository.save(membership);
-        customerProfileRepository.findById(saved.getCustomerId())
-            .filter(customer -> saved.getTenantId().equals(customer.getTenantId()))
-            .map(CustomerProfile::getUserId)
-            .filter(recipientUserId -> recipientUserId != null && !recipientUserId.equals(userId))
-            .ifPresent(recipientUserId -> notificationService.create(
-                saved.getTenantId(),
-                recipientUserId,
-                "MEMBERSHIP_CREATED",
-                "Membership created",
-                "Your " + saved.getPlanName() + " membership was created.",
-                "/dashboard"
-            ));
-        return ResponseEntity.status(HttpStatus.CREATED).body(saved);
-    }
+		Membership saved = membershipRepository.save(membership);
+		cacheInvalidationService.evictBusinessDataCaches();
+		customerProfileRepository.findById(saved.getCustomerId())
+				.filter(customer -> saved.getTenantId().equals(customer.getTenantId())).map(CustomerProfile::getUserId)
+				.filter(recipientUserId -> recipientUserId != null && !recipientUserId.equals(userId))
+				.ifPresent(recipientUserId -> notificationService.create(saved.getTenantId(), recipientUserId,
+						"MEMBERSHIP_CREATED", "Membership created",
+						"Your " + saved.getPlanName() + " membership was created.", "/dashboard"));
+		return ResponseEntity.status(HttpStatus.CREATED).body(saved);
+	}
 }

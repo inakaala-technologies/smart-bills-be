@@ -11,6 +11,8 @@ import com.bhive.business.repository.BusinessRepository;
 import com.bhive.business.repository.BusinessUserRepository;
 import com.bhive.common.util.TenantContext;
 import com.bhive.business.service.BusinessMembershipService;
+import com.bhive.common.cache.CacheNames;
+import com.bhive.common.service.CacheInvalidationService;
 import com.bhive.common.service.S3ImageUploadService;
 import org.springframework.http.MediaType;
 import org.springframework.web.multipart.MultipartFile;
@@ -22,6 +24,9 @@ import com.bhive.customer.repository.BusinessCustomerRepository;
 import com.bhive.customer.repository.CustomerProfileRepository;
 import com.bhive.payment.entity.Payment;
 import com.bhive.payment.repository.PaymentRepository;
+
+import lombok.extern.slf4j.Slf4j;
+
 import com.bhive.appointment.entity.Appointment;
 import com.bhive.appointment.repository.AppointmentRepository;
 import java.math.BigDecimal;
@@ -40,507 +45,462 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 import org.springframework.http.ResponseEntity;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
+@Slf4j
 @RequestMapping("/api/v1/businesses")
 public class BusinessController {
 
-    private final BusinessRepository businessRepository;
-    private final BusinessUserRepository businessUserRepository;
-    private final CustomerProfileRepository customerProfileRepository;
-    private final BusinessCustomerRepository businessCustomerRepository;
-    private final InvoiceRepository invoiceRepository;
-    private final PaymentRepository paymentRepository;
-    private final AppointmentRepository appointmentRepository;
-    private final BusinessMembershipService businessMembershipService;
-    private final S3ImageUploadService s3ImageUploadService;
+	private final BusinessRepository businessRepository;
+	private final BusinessUserRepository businessUserRepository;
+	private final CustomerProfileRepository customerProfileRepository;
+	private final BusinessCustomerRepository businessCustomerRepository;
+	private final InvoiceRepository invoiceRepository;
+	private final PaymentRepository paymentRepository;
+	private final AppointmentRepository appointmentRepository;
+	private final BusinessMembershipService businessMembershipService;
+	private final S3ImageUploadService s3ImageUploadService;
+	private final CacheInvalidationService cacheInvalidationService;
 
-    public BusinessController(BusinessRepository businessRepository,
-                             BusinessUserRepository businessUserRepository,
-                             CustomerProfileRepository customerProfileRepository,
-                             BusinessCustomerRepository businessCustomerRepository,
-                             InvoiceRepository invoiceRepository,
-                             PaymentRepository paymentRepository,
-                             AppointmentRepository appointmentRepository,
-                             BusinessMembershipService businessMembershipService,
-                             S3ImageUploadService s3ImageUploadService) {
-        this.businessMembershipService = businessMembershipService;
-        this.s3ImageUploadService = s3ImageUploadService;
-        this.businessRepository = businessRepository;
-        this.businessUserRepository = businessUserRepository;
-        this.customerProfileRepository = customerProfileRepository;
-        this.businessCustomerRepository = businessCustomerRepository;
-        this.invoiceRepository = invoiceRepository;
-        this.paymentRepository = paymentRepository;
-        this.appointmentRepository = appointmentRepository;
-    }
+	public BusinessController(BusinessRepository businessRepository, BusinessUserRepository businessUserRepository,
+			CustomerProfileRepository customerProfileRepository, BusinessCustomerRepository businessCustomerRepository,
+			InvoiceRepository invoiceRepository, PaymentRepository paymentRepository,
+			AppointmentRepository appointmentRepository, BusinessMembershipService businessMembershipService,
+			S3ImageUploadService s3ImageUploadService, CacheInvalidationService cacheInvalidationService) {
+		this.businessMembershipService = businessMembershipService;
+		this.s3ImageUploadService = s3ImageUploadService;
+		this.businessRepository = businessRepository;
+		this.businessUserRepository = businessUserRepository;
+		this.customerProfileRepository = customerProfileRepository;
+		this.businessCustomerRepository = businessCustomerRepository;
+		this.invoiceRepository = invoiceRepository;
+		this.paymentRepository = paymentRepository;
+		this.appointmentRepository = appointmentRepository;
+		this.cacheInvalidationService = cacheInvalidationService;
+	}
 
-    @GetMapping
-    public List<Business> getAllBusinesses() {
-        Long tenantId = TenantContext.getTenantId();
-        if (tenantId == null) {
-            return businessRepository.findAll();
-        }
-        return businessRepository.findAll().stream()
-            .filter(business -> tenantId.equals(business.getTenantId()))
-            .toList();
-    }
+	@GetMapping
+	public List<Business> getAllBusinesses() {
+		Long tenantId = TenantContext.getTenantId();
+		if (tenantId == null) {
+			return businessRepository.findAll();
+		}
+		return businessRepository.findAll().stream().filter(business -> tenantId.equals(business.getTenantId()))
+				.toList();
+	}
 
-    @GetMapping("/nearby")
-    public ResponseEntity<List<NearbyBusinessSummary>> getNearbyBusinesses(
-        @RequestParam Double latitude,
-        @RequestParam Double longitude,
-        @RequestParam(defaultValue = "25") double radiusKm
-    ) {
-        if (!GeoUtils.isValidCoordinates(latitude, longitude) || radiusKm <= 0 || radiusKm > 500) {
-            return ResponseEntity.badRequest().build();
-        }
-        List<NearbyBusinessSummary> nearby = businessRepository
-            .findByStatusAndLatitudeIsNotNullAndLongitudeIsNotNull(BusinessStatus.ACTIVE).stream()
-            .filter(Business::isProfileComplete)
-            .map(business -> new NearbyBusinessSummary(
-                business.getId(),
-                business.getName(),
-                business.getBusinessType(),
-                business.getAddress(),
-                business.getLatitude(),
-                business.getLongitude(),
-                GeoUtils.distanceKm(latitude, longitude, business.getLatitude(),                 business.getLongitude()),
-                                business.isAppointmentsEnabled(),
-                                business.isAppointmentsEnabled() && business.isHomeServicesEnabled()
-                            ))
-            .filter(business -> business.distanceKm() <= radiusKm)
-            .sorted(java.util.Comparator.comparingDouble(NearbyBusinessSummary::distanceKm))
-            .limit(100)
-            .toList();
-        return ResponseEntity.ok(nearby);
-    }
+	@GetMapping("/nearby")
+	public ResponseEntity<List<NearbyBusinessSummary>> getNearbyBusinesses(@RequestParam Double latitude,
+			@RequestParam Double longitude, @RequestParam(defaultValue = "25") double radiusKm) {
+		if (!GeoUtils.isValidCoordinates(latitude, longitude) || radiusKm <= 0 || radiusKm > 500) {
+			return ResponseEntity.badRequest().build();
+		}
+		List<NearbyBusinessSummary> nearby = businessRepository
+				.findByStatusAndLatitudeIsNotNullAndLongitudeIsNotNull(BusinessStatus.ACTIVE).stream()
+				.filter(Business::isProfileComplete)
+				.map(business -> new NearbyBusinessSummary(business.getId(), business.getName(),
+						business.getBusinessType(), business.getAddress(), business.getLatitude(),
+						business.getLongitude(),
+						GeoUtils.distanceKm(latitude, longitude, business.getLatitude(), business.getLongitude()),
+						business.isAppointmentsEnabled(),
+						business.isAppointmentsEnabled() && business.isHomeServicesEnabled()))
+				.filter(business -> business.distanceKm() <= radiusKm)
+				.sorted(java.util.Comparator.comparingDouble(NearbyBusinessSummary::distanceKm)).limit(100).toList();
+		return ResponseEntity.ok(nearby);
+	}
 
-    @GetMapping("/my")
-    public List<Business> getMyBusinesses() {
-        Long tenantId = TenantContext.getTenantId();
-        Long userId = TenantContext.getUserId();
+	@GetMapping("/my")
+	public List<Business> getMyBusinesses() {
+		Long tenantId = TenantContext.getTenantId();
+		Long userId = TenantContext.getUserId();
 
-        if (tenantId == null || userId == null) {
-            return businessRepository.findAll();
-        }
+		if (tenantId == null || userId == null) {
+			return businessRepository.findAll();
+		}
 
-        List<Long> businessIds = businessUserRepository.findByUserIdAndTenantId(userId, tenantId).stream()
-            .map(BusinessUser::getBusinessId)
-            .toList();
+		List<Long> businessIds = businessUserRepository.findByUserIdAndTenantId(userId, tenantId).stream()
+				.map(BusinessUser::getBusinessId).toList();
 
-        if (businessIds.isEmpty()) {
-            return List.of();
-        }
+		if (businessIds.isEmpty()) {
+			return List.of();
+		}
 
-        return businessRepository.findAll().stream()
-            .filter(business -> businessIds.contains(business.getId()) && tenantId.equals(business.getTenantId()))
-            .toList();
-    }
+		return businessRepository.findAll().stream()
+				.filter(business -> businessIds.contains(business.getId()) && tenantId.equals(business.getTenantId()))
+				.toList();
+	}
 
-    @GetMapping("/customer/invoices")
-    public List<Business> getCustomerInvoiceBusinesses() {
-        Long tenantId = TenantContext.getTenantId();
-        Long userId = TenantContext.getUserId();
+	@GetMapping("/customer/invoices")
+	public List<Business> getCustomerInvoiceBusinesses() {
+		Long tenantId = TenantContext.getTenantId();
+		Long userId = TenantContext.getUserId();
 
-        if (tenantId == null || userId == null) {
-            return List.of();
-        }
+		if (tenantId == null || userId == null) {
+			return List.of();
+		}
 
-        List<Long> customerIds = customerProfileRepository.findAll().stream()
-            .filter(customer -> tenantId.equals(customer.getTenantId()))
-            .filter(customer -> userId.equals(customer.getUserId()))
-            .map(CustomerProfile::getId)
-            .toList();
+		List<Long> customerIds = customerProfileRepository.findAll().stream()
+				.filter(customer -> tenantId.equals(customer.getTenantId()))
+				.filter(customer -> userId.equals(customer.getUserId())).map(CustomerProfile::getId).toList();
 
-        if (customerIds.isEmpty()) {
-            return List.of();
-        }
+		if (customerIds.isEmpty()) {
+			return List.of();
+		}
 
-        Set<Long> businessIds = invoiceRepository.findAll().stream()
-            .filter(invoice -> invoice.getCustomerId() != null)
-            .filter(invoice -> customerIds.contains(invoice.getCustomerId()))
-            .map(Invoice::getBusinessId)
-            .collect(Collectors.toSet());
+		Set<Long> businessIds = invoiceRepository.findAll().stream().filter(invoice -> invoice.getCustomerId() != null)
+				.filter(invoice -> customerIds.contains(invoice.getCustomerId())).map(Invoice::getBusinessId)
+				.collect(Collectors.toSet());
 
-        businessCustomerRepository.findByTenantId(tenantId).stream()
-            .filter(link -> customerIds.contains(link.getCustomerProfileId()))
-            .filter(link -> "ACTIVE".equalsIgnoreCase(link.getStatus()))
-            .map(BusinessCustomer::getBusinessId)
-            .forEach(businessIds::add);
+		businessCustomerRepository.findByTenantId(tenantId).stream()
+				.filter(link -> customerIds.contains(link.getCustomerProfileId()))
+				.filter(link -> "ACTIVE".equalsIgnoreCase(link.getStatus())).map(BusinessCustomer::getBusinessId)
+				.forEach(businessIds::add);
 
-        if (businessIds.isEmpty()) {
-            return List.of();
-        }
+		if (businessIds.isEmpty()) {
+			return List.of();
+		}
 
-        return businessRepository.findAll().stream()
-            .filter(business -> tenantId.equals(business.getTenantId()))
-            .filter(business -> businessIds.contains(business.getId()))
-            .toList();
-    }
+		return businessRepository.findAll().stream().filter(business -> tenantId.equals(business.getTenantId()))
+				.filter(business -> businessIds.contains(business.getId())).toList();
+	}
 
-    @GetMapping("/dashboard-summary")
-    public Map<String, Object> getBusinessDashboardSummary(@RequestParam(required = false) Long businessId,
-                                                           @RequestParam(defaultValue = "DAILY") String interval) {
-        String normalizedInterval = interval.toUpperCase(Locale.ROOT);
-        if (!List.of("DAILY", "WEEKLY", "MONTHLY").contains(normalizedInterval)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unsupported revenue interval.");
-        }
-        Long tenantId = TenantContext.getTenantId();
-        Long userId = TenantContext.getUserId();
+	@GetMapping("/dashboard-summary")
+	@Cacheable(cacheNames = CacheNames.BUSINESS_DASHBOARD, key = "T(com.bhive.common.util.TenantContext).getTenantId() + ':' + "
+			+ "T(com.bhive.common.util.TenantContext).getUserId() + ':' + "
+			+ "#businessId + ':' + #interval.toUpperCase(T(java.util.Locale).ROOT)", unless = "#result == null || #result.isEmpty()")
 
-        if (tenantId == null || userId == null) {
-            return emptySummary();
-        }
+	public Map<String, Object> getBusinessDashboardSummary(@RequestParam(required = false) Long businessId,
+			@RequestParam(defaultValue = "DAILY") String interval) {
+		String normalizedInterval = interval.toUpperCase(Locale.ROOT);
+		if (!List.of("DAILY", "WEEKLY", "MONTHLY").contains(normalizedInterval)) {
+			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unsupported revenue interval.");
+		}
+		Long tenantId = TenantContext.getTenantId();
+		Long userId = TenantContext.getUserId();
 
-        List<Long> linkedBusinessIds = businessUserRepository.findByUserIdAndTenantId(userId, tenantId).stream()
-            .map(BusinessUser::getBusinessId)
-            .filter(Objects::nonNull)
-            .distinct()
-            .toList();
+		if (tenantId == null || userId == null) {
+			return emptySummary();
+		}
 
-        if (linkedBusinessIds.isEmpty()) {
-            return emptySummary();
-        }
+		log.info("Fetching the data from DB");
 
-        List<Long> targetBusinessIds = businessId != null
-            ? linkedBusinessIds.stream().filter(id -> id.equals(businessId)).toList()
-            : linkedBusinessIds;
+		List<Long> linkedBusinessIds = businessUserRepository.findByUserIdAndTenantId(userId, tenantId).stream()
+				.map(BusinessUser::getBusinessId).filter(Objects::nonNull).distinct().toList();
 
-        if (targetBusinessIds.isEmpty()) {
-            return emptySummary();
-        }
+		if (linkedBusinessIds.isEmpty()) {
+			return emptySummary();
+		}
 
-        List<Invoice> invoices = invoiceRepository.findAll().stream()
-            .filter(invoice -> targetBusinessIds.contains(invoice.getBusinessId()))
-            .toList();
+		List<Long> targetBusinessIds = businessId != null
+				? linkedBusinessIds.stream().filter(id -> id.equals(businessId)).toList()
+				: linkedBusinessIds;
 
-        List<Payment> payments = paymentRepository.findAll().stream()
-            .filter(payment -> targetBusinessIds.contains(payment.getBusinessId()))
-            .toList();
+		if (targetBusinessIds.isEmpty()) {
+			return emptySummary();
+		}
 
-        List<Appointment> appointments = appointmentRepository.findAll().stream()
-            .filter(appointment -> targetBusinessIds.contains(appointment.getBusinessId()))
-            .toList();
+		List<Invoice> invoices = invoiceRepository.findAll().stream()
+				.filter(invoice -> targetBusinessIds.contains(invoice.getBusinessId())).toList();
 
-        List<Long> customerIds = businessCustomerRepository.findAll().stream()
-            .filter(link -> targetBusinessIds.contains(link.getBusinessId()))
-            .filter(link -> tenantId.equals(link.getTenantId()))
-            .map(BusinessCustomer::getCustomerProfileId)
-            .distinct()
-            .toList();
+		List<Payment> payments = paymentRepository.findAll().stream()
+				.filter(payment -> targetBusinessIds.contains(payment.getBusinessId())).toList();
 
-        List<CustomerProfile> activeCustomers = customerProfileRepository.findAll().stream()
-            .filter(customer -> tenantId.equals(customer.getTenantId()))
-            .filter(customer -> customerIds.contains(customer.getId()))
-            .toList();
+		List<Appointment> appointments = appointmentRepository.findAll().stream()
+				.filter(appointment -> targetBusinessIds.contains(appointment.getBusinessId())).toList();
 
-        BigDecimal totalRevenue = invoices.stream()
-            .map(Invoice::getTotalAmount)
-            .filter(Objects::nonNull)
-            .reduce(BigDecimal.ZERO, BigDecimal::add);
+		List<Long> customerIds = businessCustomerRepository.findAll().stream()
+				.filter(link -> targetBusinessIds.contains(link.getBusinessId()))
+				.filter(link -> tenantId.equals(link.getTenantId())).map(BusinessCustomer::getCustomerProfileId)
+				.distinct().toList();
 
-        List<Invoice> billableInvoices = invoices.stream()
-            .filter(invoice -> invoice.getStatus() != InvoiceStatus.DRAFT && invoice.getStatus() != InvoiceStatus.CANCELLED)
-            .toList();
-        BigDecimal billableRevenue = billableInvoices.stream()
-            .map(Invoice::getTotalAmount)
-            .filter(Objects::nonNull)
-            .map(amount -> amount.max(BigDecimal.ZERO))
-            .reduce(BigDecimal.ZERO, BigDecimal::add);
-        Map<Long, BigDecimal> verifiedPaymentsByInvoice = payments.stream()
-            .filter(payment -> payment.getStatus() != null && payment.getStatus().name().equalsIgnoreCase("VERIFIED"))
-            .filter(payment -> payment.getInvoiceId() != null && payment.getAmount() != null)
-            .collect(Collectors.toMap(
-                Payment::getInvoiceId,
-                payment -> payment.getAmount().max(BigDecimal.ZERO),
-                BigDecimal::add
-            ));
-        BigDecimal pendingPayments = billableInvoices.stream()
-            .map(invoice -> outstandingInvoiceAmount(invoice, verifiedPaymentsByInvoice))
-            .reduce(BigDecimal.ZERO, BigDecimal::add);
-        long pendingPaymentCount = billableInvoices.stream()
-            .filter(invoice -> outstandingInvoiceAmount(invoice, verifiedPaymentsByInvoice).signum() > 0)
-            .count();
-        BigDecimal completedRevenue = billableInvoices.stream()
-            .map(invoice -> {
-                BigDecimal invoiceAmount = invoice.getTotalAmount() == null
-                    ? BigDecimal.ZERO
-                    : invoice.getTotalAmount().max(BigDecimal.ZERO);
-                if (invoice.getStatus() == InvoiceStatus.PAID) return invoiceAmount;
-                BigDecimal verifiedAmount = invoice.getId() == null
-                    ? BigDecimal.ZERO
-                    : verifiedPaymentsByInvoice.getOrDefault(invoice.getId(), BigDecimal.ZERO);
-                return verifiedAmount.max(BigDecimal.ZERO).min(invoiceAmount);
-            })
-            .reduce(BigDecimal.ZERO, BigDecimal::add);
+		List<CustomerProfile> activeCustomers = customerProfileRepository.findAll().stream()
+				.filter(customer -> tenantId.equals(customer.getTenantId()))
+				.filter(customer -> customerIds.contains(customer.getId())).toList();
 
-        long newCustomers = activeCustomers.stream()
-            .filter(customer -> customer.getCreatedAt() != null)
-            .filter(customer -> customer.getCreatedAt().isAfter(LocalDate.now().minusDays(30).atStartOfDay()))
-            .count();
+		BigDecimal totalRevenue = invoices.stream().map(Invoice::getTotalAmount).filter(Objects::nonNull)
+				.reduce(BigDecimal.ZERO, BigDecimal::add);
 
-        List<Map<String, Object>> recentTransactions = invoices.stream()
-            .sorted((first, second) -> second.getCreatedAt().compareTo(first.getCreatedAt()))
-            .limit(3)
-            .map(invoice -> {
-                Map<String, Object> item = new LinkedHashMap<>();
-                item.put("id", invoice.getId());
-                item.put("name", invoice.getInvoiceNumber() != null ? invoice.getInvoiceNumber() : "Invoice");
-                item.put("amount", invoice.getTotalAmount() != null ? invoice.getTotalAmount().doubleValue() : 0d);
-                item.put("meta", invoice.getStatus() != null ? invoice.getStatus().name() : "SENT");
-                item.put("date", invoice.getIssueDate() != null ? invoice.getIssueDate().toString() : "Today");
-                return item;
-            })
-            .toList();
+		List<Invoice> billableInvoices = invoices.stream().filter(
+				invoice -> invoice.getStatus() != InvoiceStatus.DRAFT && invoice.getStatus() != InvoiceStatus.CANCELLED)
+				.toList();
+		BigDecimal billableRevenue = billableInvoices.stream().map(Invoice::getTotalAmount).filter(Objects::nonNull)
+				.map(amount -> amount.max(BigDecimal.ZERO)).reduce(BigDecimal.ZERO, BigDecimal::add);
+		Map<Long, BigDecimal> verifiedPaymentsByInvoice = payments.stream().filter(
+				payment -> payment.getStatus() != null && payment.getStatus().name().equalsIgnoreCase("VERIFIED"))
+				.filter(payment -> payment.getInvoiceId() != null && payment.getAmount() != null)
+				.collect(Collectors.toMap(Payment::getInvoiceId, payment -> payment.getAmount().max(BigDecimal.ZERO),
+						BigDecimal::add));
+		BigDecimal pendingPayments = billableInvoices.stream()
+				.map(invoice -> outstandingInvoiceAmount(invoice, verifiedPaymentsByInvoice))
+				.reduce(BigDecimal.ZERO, BigDecimal::add);
+		long pendingPaymentCount = billableInvoices.stream()
+				.filter(invoice -> outstandingInvoiceAmount(invoice, verifiedPaymentsByInvoice).signum() > 0).count();
+		BigDecimal completedRevenue = billableInvoices.stream().map(invoice -> {
+			BigDecimal invoiceAmount = invoice.getTotalAmount() == null ? BigDecimal.ZERO
+					: invoice.getTotalAmount().max(BigDecimal.ZERO);
+			if (invoice.getStatus() == InvoiceStatus.PAID)
+				return invoiceAmount;
+			BigDecimal verifiedAmount = invoice.getId() == null ? BigDecimal.ZERO
+					: verifiedPaymentsByInvoice.getOrDefault(invoice.getId(), BigDecimal.ZERO);
+			return verifiedAmount.max(BigDecimal.ZERO).min(invoiceAmount);
+		}).reduce(BigDecimal.ZERO, BigDecimal::add);
 
-        List<Map<String, Object>> upcomingRenewals = appointments.stream()
-            .filter(appointment -> appointment.getScheduledAt() != null)
-            .sorted((first, second) -> first.getScheduledAt().compareTo(second.getScheduledAt()))
-            .limit(3)
-            .map(appointment -> {
-                Map<String, Object> item = new LinkedHashMap<>();
-                long daysLeft = ChronoUnit.DAYS.between(LocalDate.now(), appointment.getScheduledAt().toLocalDate());
-                item.put("id", appointment.getId());
-                item.put("name", appointment.getServiceName() != null ? appointment.getServiceName() : "Appointment");
-                item.put("daysLeft", Math.max(daysLeft, 0L));
-                item.put("note", appointment.getStatus() != null ? appointment.getStatus().name() : "BOOKED");
-                return item;
-            })
-            .toList();
+		long newCustomers = activeCustomers.stream().filter(customer -> customer.getCreatedAt() != null)
+				.filter(customer -> customer.getCreatedAt().isAfter(LocalDate.now().minusDays(30).atStartOfDay()))
+				.count();
 
-        List<Map<String, Object>> revenueTrend = buildRevenueTrend(invoices, normalizedInterval, LocalDate.now());
+		List<Map<String, Object>> recentTransactions = invoices.stream()
+				.sorted((first, second) -> second.getCreatedAt().compareTo(first.getCreatedAt())).limit(3)
+				.map(invoice -> {
+					Map<String, Object> item = new LinkedHashMap<>();
+					item.put("id", invoice.getId());
+					item.put("name", invoice.getInvoiceNumber() != null ? invoice.getInvoiceNumber() : "Invoice");
+					item.put("amount", invoice.getTotalAmount() != null ? invoice.getTotalAmount().doubleValue() : 0d);
+					item.put("meta", invoice.getStatus() != null ? invoice.getStatus().name() : "SENT");
+					item.put("date", invoice.getIssueDate() != null ? invoice.getIssueDate().toString() : "Today");
+					return item;
+				}).toList();
 
-        Map<String, Object> summary = new LinkedHashMap<>();
-        summary.put("totalRevenue", totalRevenue.doubleValue());
-        summary.put("billableRevenue", billableRevenue.doubleValue());
-        summary.put("completedRevenue", completedRevenue.doubleValue());
-        summary.put("activeMembers", (long) activeCustomers.size());
-        summary.put("pendingPayments", pendingPayments.doubleValue());
-        summary.put("pendingPaymentCount", pendingPaymentCount);
-        summary.put("newCustomers", newCustomers);
-        summary.put("invoiceCount", invoices.size());
-        summary.put("appointmentCount", appointments.size());
-        summary.put("recentTransactions", recentTransactions);
-        summary.put("upcomingRenewals", upcomingRenewals);
-        summary.put("revenueTrend", revenueTrend);
-        return summary;
-    }
+		List<Map<String, Object>> upcomingRenewals = appointments.stream()
+				.filter(appointment -> appointment.getScheduledAt() != null)
+				.sorted((first, second) -> first.getScheduledAt().compareTo(second.getScheduledAt())).limit(3)
+				.map(appointment -> {
+					Map<String, Object> item = new LinkedHashMap<>();
+					long daysLeft = ChronoUnit.DAYS.between(LocalDate.now(),
+							appointment.getScheduledAt().toLocalDate());
+					item.put("id", appointment.getId());
+					item.put("name",
+							appointment.getServiceName() != null ? appointment.getServiceName() : "Appointment");
+					item.put("daysLeft", Math.max(daysLeft, 0L));
+					item.put("note", appointment.getStatus() != null ? appointment.getStatus().name() : "BOOKED");
+					return item;
+				}).toList();
 
-    private BigDecimal outstandingInvoiceAmount(Invoice invoice, Map<Long, BigDecimal> verifiedPaymentsByInvoice) {
-        BigDecimal invoiceAmount = invoice.getTotalAmount() == null
-            ? BigDecimal.ZERO
-            : invoice.getTotalAmount().max(BigDecimal.ZERO);
-        if (invoice.getStatus() == InvoiceStatus.PAID) return BigDecimal.ZERO;
+		List<Map<String, Object>> revenueTrend = buildRevenueTrend(invoices, normalizedInterval, LocalDate.now());
 
-        BigDecimal verifiedAmount = invoice.getId() == null
-            ? BigDecimal.ZERO
-            : verifiedPaymentsByInvoice.getOrDefault(invoice.getId(), BigDecimal.ZERO).max(BigDecimal.ZERO);
-        return invoiceAmount.subtract(verifiedAmount.min(invoiceAmount)).max(BigDecimal.ZERO);
-    }
+		Map<String, Object> summary = new LinkedHashMap<>();
+		summary.put("totalRevenue", totalRevenue.doubleValue());
+		summary.put("billableRevenue", billableRevenue.doubleValue());
+		summary.put("completedRevenue", completedRevenue.doubleValue());
+		summary.put("activeMembers", (long) activeCustomers.size());
+		summary.put("pendingPayments", pendingPayments.doubleValue());
+		summary.put("pendingPaymentCount", pendingPaymentCount);
+		summary.put("newCustomers", newCustomers);
+		summary.put("invoiceCount", invoices.size());
+		summary.put("appointmentCount", appointments.size());
+		summary.put("recentTransactions", recentTransactions);
+		summary.put("upcomingRenewals", upcomingRenewals);
+		summary.put("revenueTrend", revenueTrend);
+		return summary;
+	}
 
-    private List<Map<String, Object>> buildRevenueTrend(List<Invoice> invoices, String interval, LocalDate today) {
-        List<Map<String, Object>> trend = new ArrayList<>();
-        if ("DAILY".equals(interval)) {
-            for (int offset = 6; offset >= 0; offset--) {
-                LocalDate date = today.minusDays(offset);
-                BigDecimal amount = invoiceAmountBetween(invoices, date, date.plusDays(1));
-                trend.add(revenueTrendPoint(String.valueOf(date.getDayOfMonth()), amount));
-            }
-            return trend;
-        }
+	private BigDecimal outstandingInvoiceAmount(Invoice invoice, Map<Long, BigDecimal> verifiedPaymentsByInvoice) {
+		BigDecimal invoiceAmount = invoice.getTotalAmount() == null ? BigDecimal.ZERO
+				: invoice.getTotalAmount().max(BigDecimal.ZERO);
+		if (invoice.getStatus() == InvoiceStatus.PAID)
+			return BigDecimal.ZERO;
 
-        if ("WEEKLY".equals(interval)) {
-            LocalDate currentWeekStart = today.minusDays(today.getDayOfWeek().getValue() - DayOfWeek.MONDAY.getValue());
-            DateTimeFormatter labelFormat = DateTimeFormatter.ofPattern("d MMM", Locale.ENGLISH);
-            for (int offset = 5; offset >= 0; offset--) {
-                LocalDate start = currentWeekStart.minusWeeks(offset);
-                trend.add(revenueTrendPoint(start.format(labelFormat), invoiceAmountBetween(invoices, start, start.plusWeeks(1))));
-            }
-            return trend;
-        }
+		BigDecimal verifiedAmount = invoice.getId() == null ? BigDecimal.ZERO
+				: verifiedPaymentsByInvoice.getOrDefault(invoice.getId(), BigDecimal.ZERO).max(BigDecimal.ZERO);
+		return invoiceAmount.subtract(verifiedAmount.min(invoiceAmount)).max(BigDecimal.ZERO);
+	}
 
-        YearMonth currentMonth = YearMonth.from(today);
-        for (int offset = 5; offset >= 0; offset--) {
-            YearMonth month = currentMonth.minusMonths(offset);
-            BigDecimal amount = invoiceAmountBetween(invoices, month.atDay(1), month.plusMonths(1).atDay(1));
-            trend.add(revenueTrendPoint(month.toString(), amount));
-        }
-        return trend;
-    }
+	private List<Map<String, Object>> buildRevenueTrend(List<Invoice> invoices, String interval, LocalDate today) {
+		List<Map<String, Object>> trend = new ArrayList<>();
+		if ("DAILY".equals(interval)) {
+			for (int offset = 6; offset >= 0; offset--) {
+				LocalDate date = today.minusDays(offset);
+				BigDecimal amount = invoiceAmountBetween(invoices, date, date.plusDays(1));
+				trend.add(revenueTrendPoint(String.valueOf(date.getDayOfMonth()), amount));
+			}
+			return trend;
+		}
 
-    private BigDecimal invoiceAmountBetween(List<Invoice> invoices, LocalDate start, LocalDate end) {
-        return invoices.stream()
-            .filter(invoice -> invoice.getIssueDate() != null
-                && !invoice.getIssueDate().isBefore(start)
-                && invoice.getIssueDate().isBefore(end))
-            .map(Invoice::getTotalAmount)
-            .filter(Objects::nonNull)
-            .reduce(BigDecimal.ZERO, BigDecimal::add);
-    }
+		if ("WEEKLY".equals(interval)) {
+			LocalDate currentWeekStart = today.minusDays(today.getDayOfWeek().getValue() - DayOfWeek.MONDAY.getValue());
+			DateTimeFormatter labelFormat = DateTimeFormatter.ofPattern("d MMM", Locale.ENGLISH);
+			for (int offset = 5; offset >= 0; offset--) {
+				LocalDate start = currentWeekStart.minusWeeks(offset);
+				trend.add(revenueTrendPoint(start.format(labelFormat),
+						invoiceAmountBetween(invoices, start, start.plusWeeks(1))));
+			}
+			return trend;
+		}
 
-    private Map<String, Object> revenueTrendPoint(String label, BigDecimal amount) {
-        Map<String, Object> point = new LinkedHashMap<>();
-        point.put("label", label);
-        point.put("value", amount.doubleValue());
-        return point;
-    }
+		YearMonth currentMonth = YearMonth.from(today);
+		for (int offset = 5; offset >= 0; offset--) {
+			YearMonth month = currentMonth.minusMonths(offset);
+			BigDecimal amount = invoiceAmountBetween(invoices, month.atDay(1), month.plusMonths(1).atDay(1));
+			trend.add(revenueTrendPoint(month.toString(), amount));
+		}
+		return trend;
+	}
 
-    private Map<String, Object> emptySummary() {
-        Map<String, Object> empty = new LinkedHashMap<>();
-        empty.put("totalRevenue", 0d);
-        empty.put("billableRevenue", 0d);
-        empty.put("completedRevenue", 0d);
-        empty.put("activeMembers", 0L);
-        empty.put("pendingPayments", 0d);
-        empty.put("pendingPaymentCount", 0L);
-        empty.put("newCustomers", 0L);
-        empty.put("invoiceCount", 0);
-        empty.put("appointmentCount", 0);
-        empty.put("recentTransactions", List.of());
-        empty.put("upcomingRenewals", List.of());
-        empty.put("revenueTrend", List.of());
-        return empty;
-    }
+	private BigDecimal invoiceAmountBetween(List<Invoice> invoices, LocalDate start, LocalDate end) {
+		return invoices.stream()
+				.filter(invoice -> invoice.getIssueDate() != null && !invoice.getIssueDate().isBefore(start)
+						&& invoice.getIssueDate().isBefore(end))
+				.map(Invoice::getTotalAmount).filter(Objects::nonNull).reduce(BigDecimal.ZERO, BigDecimal::add);
+	}
 
-    @GetMapping("/{id}")
-    public ResponseEntity<Business> getBusinessById(@PathVariable Long id) {
-        Long tenantId = TenantContext.getTenantId();
-        return businessRepository.findById(id)
-            .filter(business -> tenantId == null || tenantId.equals(business.getTenantId()))
-            .map(ResponseEntity::ok)
-            .orElse(ResponseEntity.notFound().build());
-    }
+	private Map<String, Object> revenueTrendPoint(String label, BigDecimal amount) {
+		Map<String, Object> point = new LinkedHashMap<>();
+		point.put("label", label);
+		point.put("value", amount.doubleValue());
+		return point;
+	}
 
-    @PostMapping(value = "/{id}/banner", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public ResponseEntity<?> uploadBanner(@PathVariable Long id, @RequestParam("file") MultipartFile file) {
-        Long tenantId = TenantContext.getTenantId();
-        Long userId = TenantContext.getUserId();
-        if (!businessMembershipService.userHasAccessToBusiness(userId, id, tenantId)) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "You cannot manage this business.");
-        }
-        Business business = businessRepository.findById(id)
-            .filter(b -> tenantId.equals(b.getTenantId()))
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Business not found."));
-        try {
-            business.setBannerImageUrl(s3ImageUploadService.uploadBusinessBannerImage(file, id));
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
-        }
-        return ResponseEntity.ok(businessRepository.save(business));
-    }
+	private Map<String, Object> emptySummary() {
+		Map<String, Object> empty = new LinkedHashMap<>();
+		empty.put("totalRevenue", 0d);
+		empty.put("billableRevenue", 0d);
+		empty.put("completedRevenue", 0d);
+		empty.put("activeMembers", 0L);
+		empty.put("pendingPayments", 0d);
+		empty.put("pendingPaymentCount", 0L);
+		empty.put("newCustomers", 0L);
+		empty.put("invoiceCount", 0);
+		empty.put("appointmentCount", 0);
+		empty.put("recentTransactions", List.of());
+		empty.put("upcomingRenewals", List.of());
+		empty.put("revenueTrend", List.of());
+		return empty;
+	}
 
-    @PostMapping
-    public Business createBusiness(@RequestBody Business business) {
-        if (business.getCountry() == null || business.getCountry().isBlank() || business.getCountry().length() > 80
-            || business.getRegion() == null || business.getRegion().isBlank() || business.getRegion().length() > 80
-            || business.getCity() == null || business.getCity().isBlank() || business.getCity().length() > 80
-            || !GeoUtils.isValidOptionalCoordinates(business.getLatitude(), business.getLongitude())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Country, state or region, city or town, and a valid coordinate pair are required.");
-        }
-        business.setAddress(String.join(", ", business.getCity().trim(), business.getRegion().trim(), business.getCountry().trim()));
-        Long tenantId = TenantContext.getTenantId();
-        Long userId = TenantContext.getUserId();
+	@GetMapping("/{id}")
+	public ResponseEntity<Business> getBusinessById(@PathVariable Long id) {
+		Long tenantId = TenantContext.getTenantId();
+		return businessRepository.findById(id)
+				.filter(business -> tenantId == null || tenantId.equals(business.getTenantId())).map(ResponseEntity::ok)
+				.orElse(ResponseEntity.notFound().build());
+	}
 
-        if (tenantId == null) {
-            tenantId = business.getTenantId() != null ? business.getTenantId() : 1L;
-        }
+	@PostMapping(value = "/{id}/banner", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+	public ResponseEntity<?> uploadBanner(@PathVariable Long id, @RequestParam("file") MultipartFile file) {
+		Long tenantId = TenantContext.getTenantId();
+		Long userId = TenantContext.getUserId();
+		if (!businessMembershipService.userHasAccessToBusiness(userId, id, tenantId)) {
+			throw new ResponseStatusException(HttpStatus.FORBIDDEN, "You cannot manage this business.");
+		}
+		Business business = businessRepository.findById(id).filter(b -> tenantId.equals(b.getTenantId()))
+				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Business not found."));
+		try {
+			business.setBannerImageUrl(s3ImageUploadService.uploadBusinessBannerImage(file, id));
+		} catch (IllegalArgumentException e) {
+			return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
+		}
+		return ResponseEntity.ok(businessRepository.save(business));
+	}
 
-        final Long resolvedTenantId = tenantId;
-        final Long currentUserId = userId;
-        business.setTenantId(resolvedTenantId);
+	@PostMapping
+	public Business createBusiness(@RequestBody Business business) {
+		if (business.getCountry() == null || business.getCountry().isBlank() || business.getCountry().length() > 80
+				|| business.getRegion() == null || business.getRegion().isBlank() || business.getRegion().length() > 80
+				|| business.getCity() == null || business.getCity().isBlank() || business.getCity().length() > 80
+				|| !GeoUtils.isValidOptionalCoordinates(business.getLatitude(), business.getLongitude())) {
+			throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+					"Country, state or region, city or town, and a valid coordinate pair are required.");
+		}
+		business.setAddress(String.join(", ", business.getCity().trim(), business.getRegion().trim(),
+				business.getCountry().trim()));
+		Long tenantId = TenantContext.getTenantId();
+		Long userId = TenantContext.getUserId();
 
-        Business existingBusiness = null;
-        if (business.getId() != null) {
-            existingBusiness = businessRepository.findById(business.getId()).orElse(null);
-        } else if (currentUserId != null) {
-            existingBusiness = businessUserRepository.findByUserIdAndTenantId(currentUserId, resolvedTenantId).stream()
-                .map(BusinessUser::getBusinessId)
-                .map(businessRepository::findById)
-                .filter(Optional::isPresent)
-                .map(Optional::get)
-                .filter(existing -> Objects.equals(existing.getTenantId(), resolvedTenantId))
-                .findFirst()
-                .orElse(null);
-        }
+		if (tenantId == null) {
+			tenantId = business.getTenantId() != null ? business.getTenantId() : 1L;
+		}
 
-        if (existingBusiness != null) {
-            if (business.getName() != null && !business.getName().isBlank()) {
-                existingBusiness.setName(business.getName());
-            }
-            if (business.getLegalName() != null) {
-                existingBusiness.setLegalName(business.getLegalName());
-            }
-            if (business.getBusinessType() != null) {
-                existingBusiness.setBusinessType(business.getBusinessType());
-            }
-            if (business.getGstin() != null) {
-                existingBusiness.setGstin(business.getGstin());
-            }
-            if (business.getPan() != null) {
-                existingBusiness.setPan(business.getPan());
-            }
-            if (business.getEmail() != null) {
-                existingBusiness.setEmail(business.getEmail());
-            }
-            if (business.getPhone() != null) {
-                existingBusiness.setPhone(business.getPhone());
-            }
-            if (business.getAddress() != null) {
-                existingBusiness.setAddress(business.getAddress());
-            }
-            existingBusiness.setCountry(business.getCountry().trim());
-            existingBusiness.setRegion(business.getRegion().trim());
-            existingBusiness.setCity(business.getCity().trim());
-            if (business.getLatitude() != null && business.getLongitude() != null) {
-                existingBusiness.setLatitude(business.getLatitude());
-                existingBusiness.setLongitude(business.getLongitude());
-            }
-            if (business.getStatus() != null) {
-                existingBusiness.setStatus(business.getStatus());
-            }
-            if (existingBusiness.getTenantId() == null) {
-                existingBusiness.setTenantId(resolvedTenantId);
-            }
-            if (existingBusiness.getProfileId() == null || existingBusiness.getProfileId().isBlank()) {
-                existingBusiness.setProfileId(ProfileIdGenerator.nextBusinessId(businessRepository::existsByProfileId));
-            }
+		final Long resolvedTenantId = tenantId;
+		final Long currentUserId = userId;
+		business.setTenantId(resolvedTenantId);
 
-            Business savedBusiness = businessRepository.save(existingBusiness);
-            ensureBusinessMembership(currentUserId, resolvedTenantId, savedBusiness.getId());
-            return savedBusiness;
-        }
+		Business existingBusiness = null;
+		if (business.getId() != null) {
+			existingBusiness = businessRepository.findById(business.getId()).orElse(null);
+		} else if (currentUserId != null) {
+			existingBusiness = businessUserRepository.findByUserIdAndTenantId(currentUserId, resolvedTenantId).stream()
+					.map(BusinessUser::getBusinessId).map(businessRepository::findById).filter(Optional::isPresent)
+					.map(Optional::get).filter(existing -> Objects.equals(existing.getTenantId(), resolvedTenantId))
+					.findFirst().orElse(null);
+		}
 
-        business.setProfileId(ProfileIdGenerator.nextBusinessId(businessRepository::existsByProfileId));
-        Business savedBusiness = businessRepository.save(business);
-        ensureBusinessMembership(currentUserId, resolvedTenantId, savedBusiness.getId());
-        return savedBusiness;
-    }
+		if (existingBusiness != null) {
+			if (business.getName() != null && !business.getName().isBlank()) {
+				existingBusiness.setName(business.getName());
+			}
+			if (business.getLegalName() != null) {
+				existingBusiness.setLegalName(business.getLegalName());
+			}
+			if (business.getBusinessType() != null) {
+				existingBusiness.setBusinessType(business.getBusinessType());
+			}
+			if (business.getGstin() != null) {
+				existingBusiness.setGstin(business.getGstin());
+			}
+			if (business.getPan() != null) {
+				existingBusiness.setPan(business.getPan());
+			}
+			if (business.getEmail() != null) {
+				existingBusiness.setEmail(business.getEmail());
+			}
+			if (business.getPhone() != null) {
+				existingBusiness.setPhone(business.getPhone());
+			}
+			if (business.getAddress() != null) {
+				existingBusiness.setAddress(business.getAddress());
+			}
+			existingBusiness.setCountry(business.getCountry().trim());
+			existingBusiness.setRegion(business.getRegion().trim());
+			existingBusiness.setCity(business.getCity().trim());
+			if (business.getLatitude() != null && business.getLongitude() != null) {
+				existingBusiness.setLatitude(business.getLatitude());
+				existingBusiness.setLongitude(business.getLongitude());
+			}
+			if (business.getStatus() != null) {
+				existingBusiness.setStatus(business.getStatus());
+			}
+			if (existingBusiness.getTenantId() == null) {
+				existingBusiness.setTenantId(resolvedTenantId);
+			}
+			if (existingBusiness.getProfileId() == null || existingBusiness.getProfileId().isBlank()) {
+				existingBusiness.setProfileId(ProfileIdGenerator.nextBusinessId(businessRepository::existsByProfileId));
+			}
 
-    private void ensureBusinessMembership(Long userId, Long tenantId, Long businessId) {
-        if (userId == null || tenantId == null || businessId == null) {
-            return;
-        }
+			Business savedBusiness = businessRepository.save(existingBusiness);
+			ensureBusinessMembership(currentUserId, resolvedTenantId, savedBusiness.getId());
+			cacheInvalidationService.evictBusinessDataCaches();
+			return savedBusiness;
+		}
 
-        boolean alreadyLinked = businessUserRepository.findByTenantIdAndBusinessIdAndUserId(
-            tenantId,
-            businessId,
-            userId
-        ).isPresent();
+		business.setProfileId(ProfileIdGenerator.nextBusinessId(businessRepository::existsByProfileId));
+		Business savedBusiness = businessRepository.save(business);
+		ensureBusinessMembership(currentUserId, resolvedTenantId, savedBusiness.getId());
+		cacheInvalidationService.evictBusinessDataCaches();
+		return savedBusiness;
+	}
 
-        if (alreadyLinked) {
-            return;
-        }
+	private void ensureBusinessMembership(Long userId, Long tenantId, Long businessId) {
+		if (userId == null || tenantId == null || businessId == null) {
+			return;
+		}
 
-        BusinessUser membership = new BusinessUser();
-        membership.setBusinessId(businessId);
-        membership.setUserId(userId);
-        membership.setTenantId(tenantId);
-        membership.setRole(com.bhive.business.entity.BusinessUserRole.BUSINESS_ADMIN);
-        membership.setStatus("ACTIVE");
-        businessUserRepository.save(membership);
-    }
+		boolean alreadyLinked = businessUserRepository
+				.findByTenantIdAndBusinessIdAndUserId(tenantId, businessId, userId).isPresent();
+
+		if (alreadyLinked) {
+			return;
+		}
+
+		BusinessUser membership = new BusinessUser();
+		membership.setBusinessId(businessId);
+		membership.setUserId(userId);
+		membership.setTenantId(tenantId);
+		membership.setRole(com.bhive.business.entity.BusinessUserRole.BUSINESS_ADMIN);
+		membership.setStatus("ACTIVE");
+		businessUserRepository.save(membership);
+	}
 }
